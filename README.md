@@ -16,7 +16,15 @@ This project aims to recognize and classify various actions performed by pets (i
 
 * Go to the environment: ```conda activate PAR```
 
-* Install related packages: ```pip install -r requirements.txt```
+* Install related packages: 
+
+    ```
+    pip install -r requirements.txt
+    cd features/easy_ViTPose
+    pip install -e .
+    pip install -r requirements.txt
+    cd ../..
+    ```
 
 ## Training/Validation
 
@@ -45,6 +53,8 @@ This project aims to recognize and classify various actions performed by pets (i
 * Important Notes:
     
     * Processing Time: Depending on the total duration of the videos and the number of segments to be extracted, this process might also take a significant amount of time.
+
+### Obtain Pose Estimation Dataset
 
 
 ## Prediction

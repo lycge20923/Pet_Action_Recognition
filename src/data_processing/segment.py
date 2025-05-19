@@ -5,18 +5,7 @@ import pandas as pd
 import re
 from tqdm import tqdm
 from ..utils.logging_utils import setup_logger
-
-ACTIONS = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
-           "Coughing", "Seizures", "Vomiting", "Abnormal Movement"]
-
-def _parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, default="data", help="Destination path of downloaded videos")
-    parser.add_argument('--split_dir_name', default="segmented", help="Destination path of downloaded videos")
-    parser.add_argument('--original_dir_name', type=str, default="raw")
-    parser.add_argument('--metadata_name', type=str, default="metadata.csv")
-    parser.add_argument('--operation', type=str, default="reload", choices=["extend", "reload"], help="Operation to perform: extend(only create data for new videos) or reload the dataset")
-    return parser.parse_args()
+from ..utils.cli_args import DataArguments
 
 def time_str_to_seconds(tstr):
     parts = list(map(int, tstr.split(':')))
@@ -37,13 +26,13 @@ def main(args):
     logger = setup_logger(file_path=__file__)
     
     # detect the download dir
-    split_dir = os.path.join(args.data_dir, args.split_dir_name)
+    split_dir = os.path.join(args.data_dir, args.seg_dir_name)
     if not os.path.exists(split_dir):
         args.operation = "reload"
         os.makedirs(split_dir, exist_ok=True)
     
     # read the original video
-    original_videos_dir = os.path.join(args.data_dir, args.original_dir_name)
+    original_videos_dir = os.path.join(args.data_dir, args.raw_dir_name)
     
     # video name format: {video_id}_{Action Name}_{This Action id}
     start_num = 0
@@ -69,7 +58,7 @@ def main(args):
             width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             
             # set this count for split name
-            temp_count = dict(zip(ACTIONS, [0 for _ in range(len(ACTIONS))]))
+            temp_count = dict(zip(args.actions, [0 for _ in range(len(args.actions))]))
             for action_name, time_ in actions:
                 
                 # obtain the start, end timestamp
@@ -99,7 +88,7 @@ def main(args):
     
 
 if __name__ == "__main__":
-    args = _parse_args()
+    args = DataArguments()
     main(args)
 
 

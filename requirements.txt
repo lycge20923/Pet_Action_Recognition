@@ -2,3 +2,4 @@ pandas
 tqdm 
 pytubefix
 opencv-python
+huggingface_hub

@@ -7,6 +7,7 @@ from tqdm import tqdm
 import time, random
 import shutil
 from ..utils.logging_utils import setup_logger
+from ..utils.cli_args import DataArguments
 
 def download_mp4(url:str, output_path:str) -> None:
     temp_download_path = os.path.join(os.getcwd(), "temp")
@@ -16,20 +17,11 @@ def download_mp4(url:str, output_path:str) -> None:
     shutil.move(download_path, output_path)
     os.rmdir(temp_download_path)
 
-def _arg_parser():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--drive_url', default="https://docs.google.com/spreadsheets/d/10UWZqFRBe5JKn8gc0GOzNIlZilEwLHGP2AjiCc1Hj-I/export?format=csv", help="Website url of public google drive")
-    parser.add_argument('--data_dir', default="data", help="Destination path of downloaded videos")
-    parser.add_argument('--sub_dir_name', default="raw")
-    parser.add_argument('--metadata_name', default="metadata.csv")
-    parser.add_argument('--operation', default="reload", choices=["extend", "reload"], help="Operation to perform: extend(only create data for new videos) or reload the dataset")
-    return parser.parse_args()
-
 if __name__ =='__main__':
-    args = _arg_parser()
+    args = DataArguments()
     
     # make the directory for original video
-    dataset_dir = os.path.join(args.data_dir, args.sub_dir_name) 
+    dataset_dir = os.path.join(args.data_dir, args.raw_dir_name) 
     os.makedirs(dataset_dir, exist_ok=True)
 
     # set logging
