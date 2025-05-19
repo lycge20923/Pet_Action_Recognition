@@ -34,6 +34,18 @@ This project aims to recognize and classify various actions performed by pets (i
 
     * During the process, the script might prompt you to enter a verification code or an API key. Please follow the on-screen instructions carefully.
  
+### Segment Dataset
+
+* After downloading the full videos, this step extracts the specific annotated action segments, conduct:
+
+    ```
+    python -m src.data_processing.segment
+    ```
+
+* Important Notes:
+    
+    * Processing Time: Depending on the total duration of the videos and the number of segments to be extracted, this process might also take a significant amount of time.
+
 
 ## Prediction
 
