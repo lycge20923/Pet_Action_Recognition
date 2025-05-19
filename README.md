@@ -28,8 +28,10 @@ This project aims to recognize and classify various actions performed by pets (i
     python -m src.data_processing.download_dataset
     ```
 
-* Important Notes:
+* Important Notes
+
     * This download process can take several hours to complete. It is highly recommended to run this command within a persistent terminal session (e.g., using tmux or screen) to ensure it continues running even if your connection drops.
+    
     * During the process, the script might prompt you to enter a verification code or an API key. Please follow the on-screen instructions carefully.
  
 
