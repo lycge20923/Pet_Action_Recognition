@@ -90,8 +90,9 @@ class PoseEstimationModel():
                     out_writer.write(img)
                 else:
                     cv2.imwrite(plot_path, img)
-        if is_video:
-            out_writer.release()
+        if plot_path is not None:
+            if is_video:
+                out_writer.release()
         exec_fps = total_frames / total_time
         avg_predict_success = predict_count / (ith + 1)
         
