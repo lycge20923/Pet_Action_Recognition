@@ -56,6 +56,19 @@ This project aims to recognize and classify various actions performed by pets (i
 
 ### Obtain Pose Estimation Dataset
 
+* In this step, we would refer [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose) to extract skeleton information. Conduct: 
+
+    ```
+    python -m src.data_processing.skeleton_extraction
+    ```
+
+### Train-Val Split
+
+* In this step, it reads and filters keypoint annotations, performs a 5-fold split by source video, samples fixed-size frame windows, normalizes keypoints within bounding boxes, balances class samples, and outputs train/validation JSON files. Conduct:
+
+    ```
+    python -m src.data_processing.train_split
+    ```
 
 ## Prediction
 

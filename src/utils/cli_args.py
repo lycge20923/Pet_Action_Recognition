@@ -26,6 +26,10 @@ class DataArguments:
         default="pose_estimation",
         metadata={"help": "Pose_estimation dataset dir name"}
     )
+    trainsplit_dir_name: str = field(
+        default="train_split",
+        metadata={"help":"After 5-fold split"}
+    )
     metadata_name: str = field(
         default="metadata.csv",
         metadata={"help": "Name of the metadata file"}
@@ -41,6 +45,18 @@ class DataArguments:
     annotation_file_name: str = field(
         default="annotation.json",
         metadata={"help":"Annotation name for storing data"}
+    )
+    min_kp_rate: float = field(
+        default=0.5,
+        metadata={"help":"Filter out those videos having low keypoint detection rate"}
+    )
+    window_size: int = field(
+        default=64, 
+        metadata={"help":"Frame number for splitting"}
+    )
+    num_samples: int = field(
+        default=32,
+        metadata={"help":"Sampling number for inputing to model"}
     )
     plot_pe: bool = field(default=False, metadata={"help": "Plot the results of pose estimation"})
     plot_pe_threshold: float = field(default=0.5, metadata={"help":"Threshold to show on the visualized images/videos"})

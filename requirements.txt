@@ -3,3 +3,4 @@ tqdm
 pytubefix
 opencv-python
 huggingface_hub
+scikit-learn
