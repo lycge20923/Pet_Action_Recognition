@@ -36,7 +36,7 @@ def main():
     
     # for each sample, it would be 
     # {"id":id, 
-    # "category_id": category_id, 
+    # "action_id": action_id, 
     # "video_name": video_name,
     # "source_video_id": source video id in Youtube,
     # "data": [{"keypoints": keypoint at t0, "bboxes": bboxes at t0}, {"keypoints": keypoint at t1, "bboxes": bboxes at t1}]...,
@@ -49,9 +49,9 @@ def main():
         try:
             video_name = os.path.basename(input_path)
             split_ = video_name.split("_")
-            source_video_id, category_id = int(split_[0]),  data_args.actions.index(split_[1])
+            source_video_id, action_id = int(split_[0]),  data_args.actions.index(split_[1])
             annotation = {"id": id_, 
-                        "category_id":category_id, 
+                        "action_id":action_id, 
                         "video_name": video_name, 
                         "source_video_id": source_video_id}
             

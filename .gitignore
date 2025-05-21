@@ -178,3 +178,5 @@ data/*
 models/*
 output/*
 test/*
+wandb/*
+runs/*

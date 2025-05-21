@@ -70,5 +70,16 @@ This project aims to recognize and classify various actions performed by pets (i
     python -m src.data_processing.train_split
     ```
 
+### Training
+* Finally, we could start to train. To utilize ```wandb``` to help us to find the best parameters, please follow the below steps: 
+
+    1. Conduct the following commands
+
+        ```
+        wandb sweep configs/sweep_config_original.yaml
+        ```
+
+    2. Then it would show a command like ```wandb agent <path>```, copy and run it 
+
 ## Prediction
 

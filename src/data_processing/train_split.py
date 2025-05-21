@@ -10,18 +10,18 @@ from sklearn.model_selection import StratifiedKFold
 from ..utils.cli_args import DataArguments
 from ..utils.logging_utils import setup_logger
 
-def normalize_keypoints(keypoints, bboxes):
+def normalize_keypoints(keypoints, bboxes, num_nodes):
     """
     Normalize each keypoint in a frame relative to its bounding box.
     If either keypoints or bboxes is empty, return a single [0,0,0].
     """
     if not keypoints or not bboxes or len(bboxes) != 4:
-        return [[0.0, 0.0, 0.0]]
+        return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
     x1, y1, x2, y2 = bboxes
     width = x2 - x1
     height = y2 - y1
     if width <= 0 or height <= 0:
-        return [[0.0, 0.0, 0.0]]
+        return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
     normalized = []
     for x, y, c in keypoints:
         nx = (x - x1) / width
@@ -34,7 +34,7 @@ def sample_frames_from_window(window_data, num_samples):
     idx = np.linspace(0, len(window_data) - 1, num_samples, dtype=int)
     return [window_data[i] for i in idx]
 
-def generate_window_samples(annotations, window_size, num_samples):
+def generate_window_samples(annotations, window_size, num_samples, num_nodes):
     """For each ann, split its frames into windows, sample frames, then normalize keypoints."""
     by_cat = defaultdict(list)
     for ann in annotations:
@@ -48,16 +48,16 @@ def generate_window_samples(annotations, window_size, num_samples):
             for frame in sampled:
                 kps = frame.get("keypoints", [])
                 bbox = frame.get("bboxes", [])
-                normalized_data.append(normalize_keypoints(kps, bbox))
+                normalized_data.append(normalize_keypoints(kps, bbox, num_nodes))
             sample = {
                 "video_name":      ann["video_name"],
                 "source_video_id": ann["source_video_id"],
-                "category_id":     ann["category_id"],
+                "action_id":     ann["action_id"],
                 "window_index":    w,
                 "data":            normalized_data,
                 "sampled_frames":  sampled
             }
-            by_cat[ann["category_id"]].append(sample)
+            by_cat[ann["action_id"]].append(sample)
     return by_cat
 
 def balanced_category_sampling(samples_by_cat):
@@ -82,7 +82,7 @@ def balanced_category_sampling(samples_by_cat):
 def compute_basic_stats(annotations, logger):
     """Log counts, distributions of categories, sources, rates, frames."""
     logger.info(f"Total samples: {len(annotations)}")
-    cats = [a["category_id"] for a in annotations]
+    cats = [a["action_id"] for a in annotations]
     logger.info(f"Categories: {Counter(cats)}")
     srcs = [a["source_video_id"] for a in annotations]
     logger.info(f"Video sources: {len(set(srcs))}, top10: {Counter(srcs).most_common(10)}")
@@ -112,7 +112,7 @@ def main():
     # stratify by source -> count of unique categories
     src2cats = defaultdict(set)
     for a in anns:
-        src2cats[a["source_video_id"]].add(a["category_id"])
+        src2cats[a["source_video_id"]].add(a["action_id"])
     sources = list(src2cats)
     labels  = [len(src2cats[s]) for s in sources]
 
@@ -125,7 +125,7 @@ def main():
         logger.info(f"[Fold{fold}] train_samples={len(tr_anns)}, val_samples={len(vl_anns)}")
 
         # train: window + balance
-        by_cat = generate_window_samples(tr_anns, window_size=args.window_size, num_samples=args.num_samples)
+        by_cat = generate_window_samples(tr_anns, window_size=args.window_size, num_samples=args.num_samples, num_nodes=args.num_nodes)
         raw_counts = {c: len(l) for c, l in by_cat.items()}
         logger.info(f"[Fold{fold}] raw windows per cat: {raw_counts}")
         balanced = balanced_category_sampling(by_cat)
@@ -136,7 +136,7 @@ def main():
             json.dump(balanced, f, indent=4)
 
         # val: window only
-        by_cat_v = generate_window_samples(vl_anns, window_size=args.window_size, num_samples=args.num_samples)
+        by_cat_v = generate_window_samples(vl_anns, window_size=args.window_size, num_samples=args.num_samples, num_nodes=args.num_nodes)
         flat_v = [s for lst in by_cat_v.values() for s in lst]
         random.shuffle(flat_v)
         logger.info(f"[Fold{fold}] val windows total={len(flat_v)}")

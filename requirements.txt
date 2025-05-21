@@ -4,3 +4,7 @@ pytubefix
 opencv-python
 huggingface_hub
 scikit-learn
+torch_geometric
+torchmetrics
+matplotlib
+wandb
