@@ -118,7 +118,7 @@ def main():
         opt_weight_decay=wandb.config.opt_weight_decay
     )
     aug_params_train = AugmentationArguments(
-        augment=True, 
+        augment=wandb.config.augment, 
         rot_max=wandb.config.rot_max,
         scale_min=wandb.config.scale_min,
         scale_max=wandb.config.scale_max,

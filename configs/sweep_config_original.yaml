@@ -16,6 +16,8 @@ parameters:
     distribution: log_uniform_values
     min: 1e-6
     max: 1e-3
+  augment:
+    values: [True, False]
   rot_max:
     distribution: uniform
     min: 10.0
