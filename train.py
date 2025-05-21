@@ -102,10 +102,9 @@ def val_one_epoch(model, loader, criterion, device, epoch, actions:list):
     
     return epoch_loss, epoch_acc
 
-
 def main():
     # set wandb
-    run = wandb.init(project="st_gcn")
+    run = wandb.init(project="st_gcn_adjust")
     
     # load parameters and add to wandb
     d_params = DataArguments()
@@ -132,12 +131,6 @@ def main():
     # set seed
     set_seed(train_params.seed)
     
-    # initial set
-    model = ST_GCN(params=model_params, d_params=d_params).to(train_params.device)
-    optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    criterion = torch.nn.CrossEntropyLoss()
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=0)
-    
     train_dataset = JointsDataset(d_params, aug_params_train, model_params, istrain=True)
     val_dataset = JointsDataset(d_params, aug_params_eval, model_params, istrain=False)
 
@@ -156,6 +149,19 @@ def main():
         num_workers=train_params.num_workers,
         pin_memory=True if train_params.device == "cuda" else False
     )
+    
+    # initial set
+    sample, _ = val_dataset[0]            # sample.shape = (C, T, V)
+    if isinstance(sample, torch.Tensor):
+        sample = sample.cpu().numpy()
+    sample.mean(axis=1)
+    coords = sample.mean(axis=1).T 
+    
+    joint_coords = sample.mean(axis=1).T  # shape (V, C)
+    model = ST_GCN(params=model_params, d_params=d_params, coords=coords).to(train_params.device)
+    optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
+    criterion = torch.nn.CrossEntropyLoss()
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=0)
     
     # save setting
     now = datetime.now()
