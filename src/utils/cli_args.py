@@ -136,6 +136,10 @@ class ModelArguments:
         default_factory=lambda: list(DILATIONS_LIST),
         metadata={"help":"List for dilations(branches)"}
     )
+    multihead_emb_dim: int = field(
+        default=128, 
+        metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
+    )
     
 @dataclass
 class AugmentationArguments:
@@ -230,4 +234,11 @@ class TrainingArguments:
         default= 100, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
-    
+    add_contrastive_loss: bool = field(
+        default=False,
+        metadata={"help":"Add contrastive loss"}
+    )
+    contrastive_loss_coefficient: float = field(
+        default=0.5,
+        metadata={"help":"The coefficient for adding contrastive loss"}
+    )

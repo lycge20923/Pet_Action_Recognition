@@ -8,56 +8,27 @@ import numpy as np
 
 from ..utils.cli_args import DataArguments, ModelArguments, AugmentationArguments
 
-# Assume these are correctly defined and imported
-# from ..utils.cli_args import DataArguments, ModelArguments
-# For standalone running, let's define dummy versions:
-# from dataclasses import dataclass, field
-# from typing import List, Literal
-
-# @dataclass
-# class DataArguments:
-#     data_dir: str = "data"
-#     trainsplit_dir_name: str = "train_val_splits" # Example
-#     num_samples: int = 300 # T (frames)
-#     # Add other necessary fields like yolo_pose_model_path, main_data_dir if used in _generate_keypoints
-#     # For _generate_keypoints to work, these need to be actual paths
-#     yolo_pose_model_path: str = "path/to/yolo.pt" # Placeholder
-#     main_data_dir: str = "path/to/main_dataset"  # Placeholder
-#     annotation_file_name: str = "annotations.json" # Example for _generate_keypoints
-
-# @dataclass
-# class ModelArguments:
-#     num_nodes: int = 17 # num_joints
-#     num_coords: int = 3 # x, y, confidence
-
-# (AugmentationParams defined above)
-
 
 class JointsDataset(Dataset):
     def __init__(self,
-                 d_params: DataArguments,
+                 data_params: DataArguments,
                  aug_params: AugmentationArguments,
                  model_params: ModelArguments,
                  istrain: bool = True,
                  fold_num: int = 0):
         super().__init__()
-        self.d_params = d_params
+        self.data_params = data_params
         self.aug_params = aug_params
         self.model_params = model_params
 
-        # For _generate_keypoints, these paths need to be valid
-        # Ensure they are properly set through d_params or model_params
-        # self.yolo_pose_model_path = getattr(d_params, 'yolo_pose_model_path', 'path/to/yolo.pt') # Example
-        # self.main_data_dir = getattr(d_params, 'main_data_dir', 'path/to/main_dataset') # Example
-
         self.datatype = "train" if istrain else "val"
-        # Adjust trainsplit_dir_name if it's not in your d_params
-        trainsplit_dir_name = getattr(d_params, 'trainsplit_dir_name', 'train_split')
-        self.annotation_path = os.path.join(self.d_params.data_dir, trainsplit_dir_name, f"annotation_fold{str(fold_num)}_{self.datatype}_windows.json")
+        # Adjust trainsplit_dir_name if it's not in your data_params
+        trainsplit_dir_name = getattr(data_params, 'trainsplit_dir_name', 'train_split')
+        self.annotation_path = os.path.join(self.data_params.data_dir, trainsplit_dir_name, f"annotation_fold{str(fold_num)}_{self.datatype}_windows.json")
         
-        self.T = self.d_params.num_samples
-        self.num_joints = self.d_params.num_nodes
-        self.num_coords = self.d_params.num_coords # Should be 3 (x,y,conf)
+        self.T = self.data_params.num_samples
+        self.num_joints = self.data_params.num_nodes
+        self.num_coords = self.data_params.num_coords # Should be 3 (x,y,conf)
         
         self._load_annotation() # This might call _generate_keypoints
 
@@ -76,7 +47,7 @@ class JointsDataset(Dataset):
         # Validate shape
         expected_shape = (self.T, self.num_joints, self.num_coords)
         if data_np.shape != expected_shape:
-            # Attempt to reshape or pad/truncate if necessary, or raise an error
+            
             # This part is crucial and depends on how your data is structured if not uniform
             print(f"Warning: Sample {index} has shape {data_np.shape}, expected {expected_shape}. Attempting to fix or skip.")
             # Example: if T is wrong, pad or truncate (simple padding with zeros)
@@ -346,9 +317,9 @@ class JointsDataset(Dataset):
     def _load_annotation(self):
         # This is a placeholder for your actual annotation loading.
         # Ensure self.yolo_pose_model_path and self.main_data_dir are set in __init__ if _generate_keypoints is called.
-        # Example for yolo_pose_model_path and main_data_dir (should come from d_params or model_params):
-        self.yolo_pose_model_path = getattr(self.d_params, 'yolo_pose_model_path', None)
-        self.main_data_dir = getattr(self.d_params, 'main_data_dir', None)
+        # Example for yolo_pose_model_path and main_data_dir (should come from data_params or model_params):
+        self.yolo_pose_model_path = getattr(self.data_params, 'yolo_pose_model_path', None)
+        self.main_data_dir = getattr(self.data_params, 'main_data_dir', None)
 
 
         if not os.path.exists(self.annotation_path):
@@ -397,8 +368,8 @@ class JointsDataset(Dataset):
         yolo_pose_model = YOLO(self.yolo_pose_model_path)
         
         self.annotations = []
-        # Assuming main_data_dir and d_params.annotation_file_name are for the source annotations
-        main_annotation_file = getattr(self.d_params, 'annotation_file_name', 'default_main_annotation.json')
+        # Assuming main_data_dir and data_params.annotation_file_name are for the source annotations
+        main_annotation_file = getattr(self.data_params, 'annotation_file_name', 'default_main_annotation.json')
         main_annotation_path = os.path.join(self.main_data_dir, main_annotation_file)
         
         if not os.path.exists(main_annotation_path):
@@ -475,8 +446,8 @@ class JointsDataset(Dataset):
             
             print(f"  YOLO processed {frames_processed_yolo} frames for {video_name}. Extracted {len(keypoint_sequence_for_video)} keypoint sets.")
 
-            if len(keypoint_sequence_for_video) < self.d_params.min_frames_for_sample: # Add a min_frames check
-                 print(f"  Skipping {video_name}: not enough frames ({len(keypoint_sequence_for_video)} / {self.d_params.min_frames_for_sample})")
+            if len(keypoint_sequence_for_video) < self.data_params.min_frames_for_sample: # Add a min_frames check
+                 print(f"  Skipping {video_name}: not enough frames ({len(keypoint_sequence_for_video)} / {self.data_params.min_frames_for_sample})")
                  continue
 
             # Uniformly sample T frames
@@ -505,3 +476,43 @@ class JointsDataset(Dataset):
         with open(self.annotation_path, 'w') as f:
             json.dump(self.annotations, f, indent=4)
         print(f"Saved {len(self.annotations)} generated annotations to {self.annotation_path}")
+        
+class SiameseJointsDataset(Dataset):
+    """
+    Wrapper to produce pairs for joint CrossEntropy + Contrastive training.
+    Returns:
+      (x1, x2), (lab1, lab2), y
+      lab1, lab2: labels for CE loss
+      y: binary (0: same, 1: different) for ContrastiveLoss
+    """
+    def __init__(self, base_dataset: JointsDataset):
+        self.base = base_dataset
+        # Build mapping label -> indices for sampling
+        self.label_to_indices = {}
+        for idx in range(len(self.base)):
+            _, lab = self.base[idx]
+            lab = int(lab.item())
+            self.label_to_indices.setdefault(lab, []).append(idx)
+        self.labels = list(self.label_to_indices.keys())
+
+    def __len__(self):
+        return len(self.base)
+
+    def __getitem__(self, index):
+        x1, lab1 = self.base[index]
+        lab1_int = int(lab1.item())
+
+        # obtain another sample
+        if random.random() < 0.5:
+            idx2 = random.choice(self.label_to_indices[lab1_int])
+            y = 0.0
+        else:
+            neg_label = random.choice([l for l in self.labels if l != lab1_int])
+            idx2 = random.choice(self.label_to_indices[neg_label])
+            y = 1.0
+
+        x2, lab2 = self.base[idx2]
+
+        y = torch.tensor(y, dtype=torch.float32)
+        
+        return (x1, x2), (lab1, lab2), y

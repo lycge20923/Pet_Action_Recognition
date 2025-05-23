@@ -4,20 +4,28 @@ metric:
   name: best_val_acc # what we focus 
   goal: maximize # maximize the metric
 parameters:
+  t_kernel_size:
+    values: [9, 11, 13, 17]
   intermidiate_channels:
     values: [32, 64]
   final_channels: 
     values: [64, 128, 256]
   learning_rate:
     distribution: log_uniform_values
-    min: 3e-5
+    min: 1e-7
     max: 1e-3
   opt_weight_decay:
     distribution: log_uniform_values
     min: 1e-6
     max: 1e-3
-  augment:
+  add_contrastive_loss:
     values: [True, False]
+  contrastive_loss_coefficient:
+    distribution: uniform
+    min: 0.1
+    max: 0.8
+  augment:
+    values: [False]
   rot_max:
     distribution: uniform
     min: 10.0
@@ -47,4 +55,4 @@ parameters:
     min: 0.0
     max: 0.3
   
-count: 50
+count: 100

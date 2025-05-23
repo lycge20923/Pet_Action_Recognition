@@ -10,9 +10,112 @@ import torch
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 
-from src.models.stgcn_model import ST_GCN
-from src.data_processing.dataset import JointsDataset
-from src.utils.cli_args import *
+from src.models.stgcn_model import ST_GCN, STGCN_MultiHead
+from src.models.loss import ContrastiveLoss
+from src.dataset.dataset import JointsDataset, SiameseJointsDataset
+from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
+
+def setup_experiments():
+    # set wandb
+    run = wandb.init(project="st_gcn_adjust")
+    
+    # load parameters and add to wandb
+    data_params = DataArguments()
+    model_params = ModelArguments(
+        intermediate_channels=wandb.config.intermidiate_channels,
+        final_channels=wandb.config.final_channels,
+        t_kernel_size=wandb.config.t_kernel_size
+    )
+    train_params = TrainingArguments(
+        add_contrastive_loss=wandb.config.add_contrastive_loss,
+        contrastive_loss_coefficient=wandb.config.contrastive_loss_coefficient,
+        learning_rate=wandb.config.learning_rate,
+        opt_weight_decay=wandb.config.opt_weight_decay
+    )
+    aug_params_train = AugmentationArguments(
+        augment=wandb.config.augment, 
+        rot_max=wandb.config.rot_max,
+        scale_min=wandb.config.scale_min,
+        scale_max=wandb.config.scale_max,
+        joint_drop_prob=wandb.config.joint_drop_prob,
+        frame_drop_prob=wandb.config.frame_drop_prob
+    )
+    aug_params_eval = AugmentationArguments(
+        augment=False
+    )
+    
+    # saving dir
+    now = datetime.now()
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
+    saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_dir_name, timestamp)
+    os.makedirs(saving_dir, exist_ok=True)
+    
+    return {"run": run, 
+            "parameters":
+                {"data": data_params, 
+                 "model":model_params, 
+                 "train":train_params, 
+                 "aug_train": aug_params_train,
+                 "aug_val": aug_params_eval},
+            "saving_dir":saving_dir,
+            "timestamp":timestamp
+            }
+
+def prepare_dataloaders(data_params:DataArguments, 
+                        aug_params_train:AugmentationArguments, 
+                        aug_params_eval:AugmentationArguments, 
+                        model_params:ModelArguments, 
+                        train_params:TrainingArguments):
+    
+    val_dataset = JointsDataset(data_params, aug_params_eval, model_params, istrain=False)
+    train_dataset = JointsDataset(data_params, aug_params_train, model_params, istrain=True)
+    # for contrastive learning
+    if train_params.add_contrastive_loss:
+        train_dataset = SiameseJointsDataset(train_dataset)
+    
+    sample, _ = val_dataset[0]            # sample.shape = (C, T, V)
+    if isinstance(sample, torch.Tensor):
+        sample = sample.cpu().numpy()
+    sample.mean(axis=1)
+    coords = sample.mean(axis=1).T 
+    
+    # build dataloader
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_params.batch_size,
+        shuffle=True,
+        num_workers=train_params.num_workers,
+        pin_memory=True if train_params.device == "cuda" else False
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=train_params.batch_size,
+        shuffle=False, 
+        num_workers=train_params.num_workers,
+        pin_memory=True if train_params.device == "cuda" else False
+    )
+    
+    return {"data_loader":{"train":train_loader, "val":val_loader}, "center_coords":coords}
+
+def build_model_and_optimizer(model_params:ModelArguments, 
+                              data_params:DataArguments, 
+                              train_params:TrainingArguments, 
+                              coords):
+    
+    # set loss
+    cross_entropy_loss = torch.nn.CrossEntropyLoss()
+    contrastive_loss = ContrastiveLoss()
+    
+    # set model
+    if not train_params.add_contrastive_loss:
+        model = ST_GCN(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations).to(train_params.device)
+    else:
+        model = STGCN_MultiHead(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations, embed_dim=model_params.multihead_emb_dim).to(train_params.device)
+    # set optimizer and scheduler
+    optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=0)
+    
+    return {"loss":{"cross entropy": cross_entropy_loss, "contrastive learning": contrastive_loss}, "model":model, "optimizer":optimizer, "scheduler":scheduler}
 
 def set_seed(seed):
     random.seed(seed)
@@ -22,38 +125,84 @@ def set_seed(seed):
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-def train_one_epoch(model, loader, criterion, optimizer, device, epoch):
+def train_one_epoch(model, 
+                    loader, 
+                    cross_entropy_loss, 
+                    optimizer, 
+                    epoch,
+                    train_params:TrainingArguments,
+                    contrastive_loss=None):
+    # initial set
     model.train()
     correct = 0
     sum_loss = 0
-    total_samples = 0
-    for batch_idx, (data, label) in enumerate(loader):
-        data = data.to(device)
-        label = label.to(device)
+    total_individual_samples = 0
+    device = train_params.device
+    
+    for batch_idx, batch_data in enumerate(loader):
         
-
-        output = model(data)
-
-        loss = criterion(output, label)
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        
+        batch_loss_total = None
+        batch_loss_ce_val = 0.0 
+        
+        if train_params.add_contrastive_loss and contrastive_loss: 
+            (x1, x2), (lab1, lab2), y = batch_data
+            x1, x2 = x1.to(device), x2.to(device)
+            lab1, lab2 = lab1.to(device), lab2.to(device)
+            y = y.to(device)
+            emb1, logit1 = model(x1)
+            emb2, logit2 = model(x2)
+            
+            # calculate loss
+            loss_ce_part1 = cross_entropy_loss(logit1, lab1)
+            loss_ce_part2 = cross_entropy_loss(logit2, lab2)
+            batch_loss_ce_tensor = loss_ce_part1 + loss_ce_part2 
+            batch_loss_ce_val = batch_loss_ce_tensor.item() 
 
-        current_batch_size = label.size(0)
-        total_samples += current_batch_size
-        sum_loss += loss.item() * current_batch_size
-        _, predict = torch.max(output.data, 1)
-        correct += (predict == label).sum().item()
+            batch_loss_cl = contrastive_loss(emb1, emb2, y)
+            batch_loss_total = batch_loss_ce_tensor + train_params.contrastive_loss_coefficient * batch_loss_cl 
+            
+            batch_loss_total.backward()
+            optimizer.step()
+            
+            batch_size_pairs = lab1.size(0)
+            total_individual_samples += batch_size_pairs * 2
+            sum_loss += batch_loss_total.item() * batch_size_pairs
+
+            _, pred1 = torch.max(logit1.data, 1)
+            _, pred2 = torch.max(logit2.data, 1)
+            correct += (pred1 == lab1).sum().item()
+            correct += (pred2 == lab2).sum().item()
+        else: 
+            data, label = batch_data
+            data = data.to(device)
+            label = label.to(device)
+            
+            _, output = model(data)
+
+            batch_loss_ce_tensor = cross_entropy_loss(output, label) 
+            batch_loss_ce_val = batch_loss_ce_tensor.item() 
+            
+            batch_loss_ce_tensor.backward() 
+            optimizer.step()
+
+            current_batch_size = label.size(0)
+            total_individual_samples += current_batch_size 
+            sum_loss += batch_loss_ce_val * current_batch_size 
+            _, predict = torch.max(output.data, 1)
+            correct += (predict == label).sum().item()
+            batch_loss_total = batch_loss_ce_tensor 
         
-        wandb.log({"batch_train_loss": loss.item()})
+        wandb.log({"train_batch_loss_total": batch_loss_total.item(), "train_batch_loss_ce": batch_loss_ce_val})
         
-    epoch_acc = (correct / total_samples)
-    epoch_loss = (sum_loss/ total_samples)
+    epoch_loss = sum_loss / len(loader.dataset) 
+    epoch_acc = correct / total_individual_samples
     
     wandb.log({"epoch": epoch, "train_loss":epoch_loss, "train_acc": epoch_acc})
     return epoch_loss, epoch_acc
 
-def val_one_epoch(model, loader, criterion, device, epoch, actions:list):
+def val_one_epoch(model, loader, cross_entropy_loss, device, epoch, actions:list):
     model.eval()
     test_correct = 0
     test_loss = 0
@@ -69,8 +218,8 @@ def val_one_epoch(model, loader, criterion, device, epoch, actions:list):
             data = data.to(device)
             label = label.to(device)
 
-            output = model(data)
-            loss = criterion(output, label)
+            _, output = model(data)
+            loss = cross_entropy_loss(output, label)
             current_batch_size = label.size(0)
             total_samples += current_batch_size
             test_loss += loss.item() * current_batch_size
@@ -103,72 +252,29 @@ def val_one_epoch(model, loader, criterion, device, epoch, actions:list):
     return epoch_loss, epoch_acc
 
 def main():
-    # set wandb
-    run = wandb.init(project="st_gcn_adjust")
-    
-    # load parameters and add to wandb
-    d_params = DataArguments()
-    model_params = ModelArguments(
-        intermediate_channels=wandb.config.intermidiate_channels,
-        final_channels=wandb.config.final_channels,
-        t_kernel_size=wandb.config.t_kernel_size
-    )
-    train_params = TrainingArguments(
-        learning_rate=wandb.config.learning_rate,
-        opt_weight_decay=wandb.config.opt_weight_decay
-    )
-    aug_params_train = AugmentationArguments(
-        augment=wandb.config.augment, 
-        rot_max=wandb.config.rot_max,
-        scale_min=wandb.config.scale_min,
-        scale_max=wandb.config.scale_max,
-        joint_drop_prob=wandb.config.joint_drop_prob,
-        frame_drop_prob=wandb.config.frame_drop_prob
-    )
-    aug_params_eval = AugmentationArguments(
-        augment=False
-    )
+    # initial set
+    settings = setup_experiments()
+    run = settings["run"]
+    params = settings["parameters"]
+    data_params, model_params, train_params, aug_params_train, aug_params_eval = \
+        params["data"], params["model"], params["train"], params["aug_train"], params["aug_val"]
+    saving_dir = settings["saving_dir"]
+    timestamp = settings["timestamp"]
     
     # set seed
     set_seed(train_params.seed)
     
-    train_dataset = JointsDataset(d_params, aug_params_train, model_params, istrain=True)
-    val_dataset = JointsDataset(d_params, aug_params_eval, model_params, istrain=False)
-
-    # build dataloader
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=train_params.batch_size,
-        shuffle=True,
-        num_workers=train_params.num_workers,
-        pin_memory=True if train_params.device == "cuda" else False
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=train_params.batch_size,
-        shuffle=False, 
-        num_workers=train_params.num_workers,
-        pin_memory=True if train_params.device == "cuda" else False
-    )
+    # set data loader
+    loaders = prepare_dataloaders(data_params, aug_params_train, aug_params_eval, model_params, train_params)
+    train_loader, val_loader = loaders["data_loader"]["train"], loaders["data_loader"]["val"]
+    coords = loaders["center_coords"]
     
-    # initial set
-    sample, _ = val_dataset[0]            # sample.shape = (C, T, V)
-    if isinstance(sample, torch.Tensor):
-        sample = sample.cpu().numpy()
-    sample.mean(axis=1)
-    coords = sample.mean(axis=1).T 
-    
-    joint_coords = sample.mean(axis=1).T  # shape (V, C)
-    model = ST_GCN(params=model_params, d_params=d_params, coords=coords, dilations=model_params.dilations).to(train_params.device)
-    optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    criterion = torch.nn.CrossEntropyLoss()
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=0)
-    
-    # save setting
-    now = datetime.now()
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
-    saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_dir_name, timestamp)
-    os.makedirs(saving_dir, exist_ok=True)
+    # set model, loss, optimizer, scheduler
+    train_objects = build_model_and_optimizer(model_params, data_params, train_params, coords)
+    model = train_objects["model"]
+    cross_entropy_loss, contrastive_loss = train_objects["loss"]["cross entropy"], train_objects["loss"]["contrastive learning"]
+    optimizer = train_objects["optimizer"]
+    scheduler = train_objects["scheduler"]
     
     # for stats
     train_loss_history = []
@@ -180,10 +286,10 @@ def main():
     # start training 
     patient_count = 0 # for early stopping
     for epoch in range(1, train_params.epochs+1):
-        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, train_params.device, epoch)
+        train_loss, train_acc = train_one_epoch(model, train_loader, cross_entropy_loss, optimizer, epoch, train_params, contrastive_loss)
         print(f"Epoch {epoch+1} Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         
-        val_loss, val_acc = val_one_epoch(model, val_loader, criterion, train_params.device, epoch, actions=d_params.actions)
+        val_loss, val_acc = val_one_epoch(model, val_loader, cross_entropy_loss, train_params.device, epoch, actions=data_params.actions)
         print(f"Epoch {epoch+1} Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
         # save for plottting
@@ -205,7 +311,7 @@ def main():
                 'loss': val_loss,
                 'accuracy': val_acc,
                 'model_params': model_params, 
-                'dataset_params': d_params, 
+                'dataset_params': data_params, 
             }, os.path.join(saving_dir, 'best.pth'))
             patient_count = 0
         
@@ -219,7 +325,7 @@ def main():
     
     # save parameters and plot
     config_to_save = {
-        "dataset_params": dataclasses.asdict(d_params),
+        "dataset_params": dataclasses.asdict(data_params),
         "augmentation_params_train": dataclasses.asdict(aug_params_train),
         "model_params": dataclasses.asdict(model_params),
         "training_params": dataclasses.asdict(train_params),
@@ -235,7 +341,5 @@ def main():
     run.finish()
 
         
-
-
 if __name__ == "__main__":
     main()
