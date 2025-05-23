@@ -119,29 +119,57 @@ class STGC_block(nn.Module):
         stride: int,
         t_kernel_size: int,
         A_size: tuple,
-        dropout: float = 0.5
+        dropout: float = 0.5,
+        dilations: list = None,
     ):
         super().__init__()
-        # NOTE: s_kernel_size = A_size[0] will be 3
+        # spatial
         self.sgc = SpatialGraphConv(
             in_channels=in_channels,
             out_channels=out_channels,
             s_kernel_size=A_size[0]
         )
         self.M = nn.Parameter(torch.ones(A_size))
-        self.tgc = nn.Sequential(
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(),
-            nn.Dropout(p=dropout),
-            nn.Conv2d(
-                in_channels=out_channels,
-                out_channels=out_channels,
-                kernel_size=(t_kernel_size, 1),
-                stride=(stride, 1),
-                padding=((t_kernel_size - 1) // 2, 0)
-            ),
-            nn.BatchNorm2d(out_channels)
-        )
+        self.dilations = dilations
+        
+        # for No dilations
+        if not self.dilations:
+            self.tgc = nn.Sequential(
+                nn.BatchNorm2d(out_channels),
+                nn.ReLU(),
+                nn.Dropout(p=dropout),
+                nn.Conv2d(
+                    in_channels=out_channels,
+                    out_channels=out_channels,
+                    kernel_size=(t_kernel_size, 1),
+                    stride=(stride, 1),
+                    padding=((t_kernel_size - 1) // 2, 0)
+                ),
+                nn.BatchNorm2d(out_channels)
+            )
+        # for dilations
+        else:
+            self.t_branches = nn.ModuleList()
+            for d in dilations:
+                pad = d * ((t_kernel_size - 1) // 2)
+                self.t_branches.append(
+                    nn.Sequential(
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(),
+                        nn.Dropout(p=dropout),
+                        nn.Conv2d(
+                            in_channels=out_channels,
+                            out_channels=out_channels,
+                            kernel_size=(t_kernel_size, 1),
+                            stride=(stride, 1),
+                            padding=(pad, 0),
+                            dilation=(d, 1),
+                        ),
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(),
+                    )
+                )
+        
         # residual
         if stride != 1 or in_channels != out_channels:
             self.residual = nn.Sequential(
@@ -160,7 +188,12 @@ class STGC_block(nn.Module):
     def forward(self, x: torch.Tensor, A: torch.Tensor) -> torch.Tensor:
         res = self.residual(x)
         out = self.sgc(x, A * self.M)
-        out = self.tgc(out)
+        
+        if not self.dilations:
+            out = self.tgc(out)
+        else:
+            branch_outs = [branch(out) for branch in self.t_branches]
+            out = sum(branch_outs)
         out = out + res
         return self.relu(out)
 
@@ -169,7 +202,8 @@ class ST_GCN(nn.Module):
         self,
         params,
         d_params,
-        coords: np.ndarray
+        coords: np.ndarray,
+        dilations: list
     ):
         super().__init__()
         # Build graph with spatial config partitioning
@@ -191,28 +225,32 @@ class ST_GCN(nn.Module):
             params.intermediate_channels,
             stride=1,
             t_kernel_size=params.t_kernel_size,
-            A_size=A_size
+            A_size=A_size,
+            dilations=dilations
         )
         self.stgc2 = STGC_block(
             params.intermediate_channels,
             params.intermediate_channels,
             stride=1,
             t_kernel_size=params.t_kernel_size,
-            A_size=A_size
+            A_size=A_size,
+            dilations=dilations
         )
         self.stgc3 = STGC_block(
             params.intermediate_channels,
             params.final_channels,
             stride=2,
             t_kernel_size=params.t_kernel_size,
-            A_size=A_size
+            A_size=A_size,
+            dilations=dilations
         )
         self.stgc4 = STGC_block(
             params.final_channels,
             params.final_channels,
             stride=1,
             t_kernel_size=params.t_kernel_size,
-            A_size=A_size
+            A_size=A_size,
+            dilations=dilations
         )
         # Prediction head
         self.fc = nn.Conv2d(params.final_channels, params.num_classes, kernel_size=1)

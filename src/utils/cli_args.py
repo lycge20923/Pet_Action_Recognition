@@ -5,7 +5,7 @@ import torch
 DEFAULT_ACTIONS_LIST = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
            "Coughing", "Seizures", "Vomiting", "Abnormal Movement"]
 DEFAULT_SKELETON_LIST = [[0, 1], [0, 2], [1, 2], [2, 3], [3, 4], [3, 5], [5, 6], [6, 7], [3, 8], [8, 9], [9, 10], [4, 14], [14, 15], [15, 16], [4, 11], [11, 12], [12, 13]]
-
+DILATIONS_LIST = [1, 2, 3]
 @dataclass
 class DataArguments:
     actions: List[str] = field(
@@ -132,6 +132,10 @@ class ModelArguments:
         default_factory=lambda: list(DEFAULT_SKELETON_LIST),
         metadata={"help": "List of skeleton (node pairs) to be recognized."}
     )
+    dilations: List[int] = field(
+        default_factory=lambda: list(DILATIONS_LIST),
+        metadata={"help":"List for dilations(branches)"}
+    )
     
 @dataclass
 class AugmentationArguments:
@@ -222,3 +226,8 @@ class TrainingArguments:
         default="runs",
         metadata={"help":"Saving dir for training"}
     )
+    patient_epochs: int = field(
+        default= 100, 
+        metadata={"help":"If the performance is not good for a long time, terminate it!"}
+    )
+    

@@ -110,7 +110,8 @@ def main():
     d_params = DataArguments()
     model_params = ModelArguments(
         intermediate_channels=wandb.config.intermidiate_channels,
-        final_channels=wandb.config.final_channels
+        final_channels=wandb.config.final_channels,
+        t_kernel_size=wandb.config.t_kernel_size
     )
     train_params = TrainingArguments(
         learning_rate=wandb.config.learning_rate,
@@ -158,7 +159,7 @@ def main():
     coords = sample.mean(axis=1).T 
     
     joint_coords = sample.mean(axis=1).T  # shape (V, C)
-    model = ST_GCN(params=model_params, d_params=d_params, coords=coords).to(train_params.device)
+    model = ST_GCN(params=model_params, d_params=d_params, coords=coords, dilations=model_params.dilations).to(train_params.device)
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=0)
@@ -177,6 +178,7 @@ def main():
     best_val_acc = 0.0 
     
     # start training 
+    patient_count = 0 # for early stopping
     for epoch in range(1, train_params.epochs+1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, train_params.device, epoch)
         print(f"Epoch {epoch+1} Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
@@ -205,6 +207,13 @@ def main():
                 'model_params': model_params, 
                 'dataset_params': d_params, 
             }, os.path.join(saving_dir, 'best.pth'))
+            patient_count = 0
+        
+        # early stopping 
+        if patient_count > train_params.patient_epochs:
+            break
+        patient_count += 1
+        
     print(f"Best Validation Accuracy: {best_val_acc:.4f}")
     wandb.log({"best_val_acc": best_val_acc})
     
