@@ -24,6 +24,18 @@ class DataArguments:
         default="segmented",
         metadata={"help": "Segmented dataset dir name"}
     )
+    stabilized_dir_name: str = field(
+        default="stabilized",
+        metadata={"help":"Stabilized dataset dir name"}
+    )
+    skip_stabilization: bool = field(
+        default= False,
+        metadata={"help":"Whether it would skip the step for video stabilization"}
+    )
+    stabilized_crop_percentage: float = field(
+        default= 0.9,
+        metadata={"help":"The cropping ratio for video stabilization"}
+    )
     feature_extract_dir_name: str = field(
         default="feature_extracted",
         metadata={"help": "Pose_estimation dataset dir name"}
@@ -215,7 +227,7 @@ class TrainingArguments:
         metadata={"help": "Device to use for training (e.g., 'cuda', 'cpu')."}
     )
     epochs: int = field(
-        default=2000,
+        default=3000,
         metadata={"help": "Total number of training epochs."}
     )
     batch_size: int = field(

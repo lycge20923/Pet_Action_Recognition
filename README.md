@@ -54,13 +54,24 @@ This project aims to recognize and classify various actions performed by pets (i
     
     * Processing Time: Depending on the total duration of the videos and the number of segments to be extracted, this process might also take a significant amount of time.
 
+### Video Stabilization(Optional)
+
+* In this step, we would refer [vidgear](https://github.com/abhiTronix/vidgear) to conduct video stabilization:
+
+    ```
+    python -m src.data_processing.stabilization
+    ```
+
+* If you don't conduct video stabilization, make sure to set ```skip_stabilization = True``` in ```src/utils/cli_args.py```
+
+<!-- TODO:Adjust 
 ### Obtain Pose Estimation Dataset
 
 * In this step, we would refer [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose) to extract skeleton information. Conduct: 
 
     ```
     python -m src.data_processing.feature_extraction
-    ```
+    ``` -->
 
 ### Train-Val Split
 

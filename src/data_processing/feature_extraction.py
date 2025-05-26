@@ -17,8 +17,16 @@ def main():
     pe_args, of_args = PoseEstimationArguments(), OpticalFlowArguments()
     pe_model = PoseEstimationModel(**asdict(pe_args))
     optical_model = OpticalFlowModel(**asdict(of_args))
-    seg_dir = os.path.join(data_args.data_dir, data_args.seg_dir_name)
-    seg_video_paths = [os.path.join(seg_dir, ele) for ele in os.listdir(seg_dir) if ele.endswith('.mp4')]
+    
+    # check whether it use videos with or without video stabilization
+    stabilized_dir = os.path.join(data_args.data_dir, data_args.stabilized_dir_name)
+    if (not data_args.skip_stabilization) and os.path.exists(stabilized_dir):
+        videos_dir = stabilized_dir
+    else:
+        # use direct videos after segmented
+        videos_dir = os.path.join(data_args.data_dir, data_args.seg_dir_name)
+    # seg_dir = os.path.join(data_args.data_dir, data_args.seg_dir_name)
+    video_paths = [os.path.join(videos_dir, ele) for ele in os.listdir(videos_dir) if ele.endswith('.mp4')]
     
     # get logger
     logger = setup_logger(file_path=__file__, level=logging.INFO)
@@ -31,7 +39,7 @@ def main():
         os.makedirs(plot_output_dir, exist_ok=True)
     
     # record input
-    logger.info(f"Input Directory: {seg_dir}")
+    logger.info(f"Input Directory: {videos_dir}")
     
     # set for annotation
     pe_dir = os.path.join(data_args.data_dir, data_args.feature_extract_dir_name)
@@ -50,7 +58,7 @@ def main():
     # start inference
     sum_exec_fps_pe, sum_keypoint_detection_rate = 0, 0
     sum_exec_fps_of = 0
-    for id_, input_path in enumerate(seg_video_paths):
+    for id_, input_path in enumerate(video_paths):
         try:
             video_name = os.path.basename(input_path)
             split_ = video_name.split("_")
@@ -123,7 +131,7 @@ def main():
         except Exception as e:
             logger.error(f"Input:{os.path.basename(input_path)}, Error happens: {e}")
         
-    txt = f"(Pose Estimation)Avg Execution FPS: {sum_exec_fps_pe / len(seg_video_paths):.4f}, (Pose Estimation)Avg Keypoints Detection Rate: {sum_keypoint_detection_rate / len(seg_video_paths):.4f}, (Optical Flow)Avg Execution FPS:{sum_exec_fps_of/len(seg_video_paths):.4f} "
+    txt = f"(Pose Estimation)Avg Execution FPS: {sum_exec_fps_pe / len(video_paths):.4f}, (Pose Estimation)Avg Keypoints Detection Rate: {sum_keypoint_detection_rate / len(video_paths):.4f}, (Optical Flow)Avg Execution FPS:{sum_exec_fps_of/len(video_paths):.4f} "
     logger.info(txt)
     
     # write annotation

@@ -8,3 +8,4 @@ torch_geometric
 torchmetrics
 matplotlib
 wandb
+git+https://github.com/abhiTronix/vidgear.git
