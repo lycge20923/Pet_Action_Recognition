@@ -30,7 +30,7 @@ def crop_and_save_video(input_path: str,
             break
 
         bbox = bbox_annotations[frame_idx].get("bboxes", None)
-        if not bbox:
+        if bbox is None or len(bbox) == 0:
             bbox = prev_bbox
         else:
             prev_bbox = bbox
