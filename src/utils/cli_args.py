@@ -121,6 +121,10 @@ class OpticalFlowArguments:
         default="features/SEA_RAFT/config/eval/spring-M.json",
         metadata={"help":"The config for initiate optical flow model"}
     )
+    input_model_size: List[int] = field(
+        default_factory=lambda: list([256, 256]),
+        metadata={"help":"Input size for 3D CNN"}
+    )
 
 @dataclass
 class OutputArguments:

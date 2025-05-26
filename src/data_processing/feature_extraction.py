@@ -5,11 +5,70 @@ from datetime import datetime
 import logging
 import json
 import numpy as np
+import cv2
 
 from ..utils.cli_args import DataArguments, PoseEstimationArguments, OpticalFlowArguments, OutputArguments
 from features.pose_estimation import PoseEstimationModel
 from features.optical_flow import OpticalFlowModel
 from ..utils.logging_utils import setup_logger
+
+def crop_and_save_video(input_path: str,
+                        bbox_annotations: list,
+                        output_path: str,
+                        resize_scale: tuple):
+    cap = cv2.VideoCapture(input_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(output_path, fourcc, fps, resize_scale)
+
+    prev_bbox = None
+    frame_idx = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        bbox = bbox_annotations[frame_idx].get("bboxes", None)
+        if not bbox:
+            bbox = prev_bbox
+        else:
+            prev_bbox = bbox
+
+        if not bbox:
+            crop_img = np.zeros((resize_scale[1], resize_scale[0], 3), dtype=np.uint8)
+        else:
+            x1, y1, x2, y2 = map(int, bbox)
+            h, w = frame.shape[:2]
+            x1, y1 = max(0, x1), max(0, y1)
+            x2, y2 = min(w, x2), min(h, y2)
+            crop = frame[y1:y2, x1:x2]
+
+            # scaling and cropping
+            ch, cw = crop.shape[:2]
+            scale = min(resize_scale[0] / cw, resize_scale[1] / ch)
+            new_w, new_h = int(cw * scale), int(ch * scale)
+            resized = cv2.resize(crop, (new_w, new_h))
+
+            pad_w = resize_scale[0] - new_w
+            pad_h = resize_scale[1] - new_h
+            top = pad_h // 2
+            bottom = pad_h - top
+            left = pad_w // 2
+            right = pad_w - left
+
+            crop_img = cv2.copyMakeBorder(
+                resized,
+                top, bottom, left, right,
+                borderType=cv2.BORDER_CONSTANT,
+                value=[0, 0, 0]
+            )
+
+        writer.write(crop_img)
+        frame_idx += 1
+
+    cap.release()
+    writer.release()
 
 def main():
     # get parameters
@@ -68,17 +127,13 @@ def main():
                         "video_name": video_name, 
                         "source_video_id": source_video_id}
             
-            # pose estimation
+            # --- pose estimation ---
             if data_args.plot_pe:
                 result_pe = pe_model.predict(input_path=input_path, 
                                         plot_path=os.path.join(plot_output_dir, os.path.basename(input_path)),
                                         plot_threshold=data_args.plot_pe_threshold)
             else:
                 result_pe = pe_model.predict(input_path=input_path)
-            
-            # optical flow
-            result_of = optical_model.predict(input_path=input_path)
-            
             
             # write pose estimation 
             keypoints_all_frames, bboxes_all_frames = result_pe["keypoints"], result_pe["bboxes"]
@@ -98,6 +153,20 @@ def main():
                     keypoints = [[float(ele[1]), float(ele[0]), float(ele[2])] for ele in keypoints[0][1]]
                     bboxes = bboxes_.tolist()[0]
                 bbox_pe_annotation.append({"keypoints": keypoints, "bboxes": bboxes})
+            
+            # --- bbox crop, resize, and store ---
+            # output
+            tmp_file_path = "temp.mp4"
+            crop_and_save_video(
+                input_path=input_path,
+                bbox_annotations=bbox_pe_annotation,
+                output_path=tmp_file_path,
+                resize_scale=of_args.input_model_size
+            )
+                        
+            # --- optical flow ---
+            result_of = optical_model.predict(input_path=tmp_file_path)
+            os.remove(tmp_file_path)
             
             # write optical flow
             optical_flow_all_frames = result_of["optical_flows"]

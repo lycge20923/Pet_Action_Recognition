@@ -76,7 +76,7 @@ class PoseEstimationModel():
             t0 = time.time()
             
             frame_keypoints, bboxes = self.model.inference(img)
-            if len(frame_keypoints) > 0:
+            if len(frame_keypoints) == 1:
                 predict_count += 1
             keypoints.append(frame_keypoints)
             bboxes_list.append(bboxes)

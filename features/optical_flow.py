@@ -64,7 +64,7 @@ def add_color_bar_to_image(image, color_bar, orientation='vertical'):
         return cv2.hconcat([image, color_bar])
 
 class OpticalFlowModel:
-    def __init__(self, model_url_name:str, cfg:str, device:str="cuda",path:str=None):
+    def __init__(self, model_url_name:str, cfg:str, device:str="cuda", path:str=None, **kwargs):
         args = argparse.Namespace(cfg = cfg, path = path, url = model_url_name, device = device)
         self.args = parse_args(args)
         self.model = RAFT.from_pretrained(model_url_name, args=self.args).to(device)
