@@ -9,3 +9,6 @@ torchmetrics
 matplotlib
 wandb
 git+https://github.com/abhiTronix/vidgear.git
+h5py
+huggingface_hub
+safetensors

@@ -6,73 +6,111 @@ import numpy as np
 import time
 import torch
 from PIL import Image
+import torch.nn.functional as F
+import json
 
-from .RAFT.core.raft import RAFT
-from .RAFT.core.utils import flow_viz
-from .RAFT.core.utils.utils import InputPadder
+from .SEA_RAFT.core.raft import RAFT
+from .SEA_RAFT.core.utils.flow_viz import flow_to_image
+from .SEA_RAFT.core.utils.utils import load_ckpt
+
+def json_to_args(json_path):
+    # return a argparse.Namespace object
+    with open(json_path, 'r') as f:
+        data = json.load(f)
+    args = argparse.Namespace()
+    args_dict = args.__dict__
+    for key, value in data.items():
+        args_dict[key] = value
+    return args
+
+def parse_args(args):
+    json_path = args.cfg
+    args = json_to_args(json_path)
+    args_dict = args.__dict__
+    for index, (key, value) in enumerate(vars(args).items()):
+        args_dict[key] = value
+    return args
+
+def create_color_bar(height, width, color_map):
+    """
+    Create a color bar image using a specified color map.
+
+    :param height: The height of the color bar.
+    :param width: The width of the color bar.
+    :param color_map: The OpenCV colormap to use.
+    :return: A color bar image.
+    """
+    # Generate a linear gradient
+    gradient = np.linspace(0, 255, width, dtype=np.uint8)
+    gradient = np.repeat(gradient[np.newaxis, :], height, axis=0)
+
+    # Apply the colormap
+    color_bar = cv2.applyColorMap(gradient, color_map)
+
+    return color_bar
+
+def add_color_bar_to_image(image, color_bar, orientation='vertical'):
+    """
+    Add a color bar to an image.
+
+    :param image: The original image.
+    :param color_bar: The color bar to add.
+    :param orientation: 'vertical' or 'horizontal'.
+    :return: Combined image with the color bar.
+    """
+    if orientation == 'vertical':
+        return cv2.vconcat([image, color_bar])
+    else:
+        return cv2.hconcat([image, color_bar])
 
 class OpticalFlowModel:
-    def __init__(self, model_dir:str="models/of",
-                 model_name:str="things", 
-                 device:str="cuda",
-                 small:bool=False,
-                 mixed_precision:bool=False,
-                 alternate_corr:bool=False
-                 ):
-        self.model_dir = model_dir
-        self.model_file_name = f"raft-{model_name}.pth"
-        self.device = device
-        self._check_and_load_model(small, mixed_precision, alternate_corr)
-        
-    def _check_and_load_model(self, small, mixed_precision, alternate_corr):
-        # load if not exist
-        model_path = os.path.join(self.model_dir, self.model_file_name)
-        if not os.path.exists(model_path):
-            LOAD_URL = "https://dl.dropboxusercontent.com/s/4j4z58wuv8o0mfz/models.zip"
-            ZIP_NAME = "models.zip"
-            os.system(f"wget {LOAD_URL}")
-            os.system(f"unzip -j {ZIP_NAME} {os.path.join('models', self.model_file_name)} -d {self.model_dir}")
-            os.remove(ZIP_NAME)
-        model_cfg = argparse.Namespace(
-            model = model_path,
-            small = small,
-            mixed_precision = mixed_precision,
-            alternate_corr = alternate_corr
-        )
-        self.model = torch.nn.DataParallel(RAFT(model_cfg))
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-        self.model = self.model.module.to(self.device)
+    def __init__(self, model_url_name:str, cfg:str, device:str="cuda",path:str=None):
+        args = argparse.Namespace(cfg = cfg, path = path, url = model_url_name, device = device)
+        self.args = parse_args(args)
+        self.model = RAFT.from_pretrained(model_url_name, args=self.args).to(device)
         self.model.eval()
-        
-    def frame_to_tensor(self, frame):
-        """
-        Convert BGR frame (numpy) to torch tensor [1,3,H,W] in RGB order, float.
-        """
-        # Convert BGR to RGB
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        # To torch tensor
-        tensor = torch.from_numpy(rgb).permute(2, 0, 1).float()
-        return tensor[None].to(self.device)
+        self.device = device
     
-    def viz(self, img=None, flo=None, correspondence=None):
-        """
-        Generate and save a visualization of image and flow for frame index idx.
-        img: [1,3,H,W], flo: [1,3,H,W]
-        """
-        flo_np = flo[0].permute(1,2,0).cpu().numpy()
-        flow_img = flow_viz.flow_to_image(flo_np)
-        if correspondence:
-            img_np = img[0].permute(1,2,0).cpu().numpy()
-            img_disp = img_np.clip(0,255).astype(np.uint8)
-            h, w = img_disp.shape[:2]
-            flow_img = cv2.resize(flow_img, (w, h), interpolation=cv2.INTER_LINEAR)
-            vis = np.concatenate([img_disp, flow_img], axis=0)
-        else:
-            vis = flow_img
-            
-        # Convert RGB to BGR for OpenCV
-        out = vis[:, :, ::-1]
-        return out
+    def forward_flow(self, image1, image2):
+        output = self.model(image1, image2, iters=self.args.iters, test_mode=True)
+        flow_final = output['flow'][-1]
+        info_final = output['info'][-1]
+        return flow_final, info_final
+    
+    def calc_flow(self, image1, image2):
+        img1 = F.interpolate(image1, scale_factor=2 ** self.args.scale, mode='bilinear', align_corners=False)
+        img2 = F.interpolate(image2, scale_factor=2 ** self.args.scale, mode='bilinear', align_corners=False)
+        H, W = img1.shape[2:]
+        flow, info = self.forward_flow(img1, img2)
+        flow_down = F.interpolate(flow, scale_factor=0.5 ** self.args.scale, mode='bilinear', align_corners=False) * (0.5 ** self.args.scale)
+        info_down = F.interpolate(info, scale_factor=0.5 ** self.args.scale, mode='area')
+        return flow_down, info_down
+    
+    def get_heatmap(self, info):
+        raw_b = info[:, 2:]
+        log_b = torch.zeros_like(raw_b)
+        weight = info[:, :2].softmax(dim=1)              
+        log_b[:, 0] = torch.clamp(raw_b[:, 0], min=0, max=self.args.var_max)
+        log_b[:, 1] = torch.clamp(raw_b[:, 1], min=self.args.var_min, max=0)
+        heatmap = (log_b * weight).sum(dim=1, keepdim=True)
+        return heatmap
+    
+    def vis_heatmap(self, image, heatmap):
+        # theta = 0.01
+        # print(heatmap.max(), heatmap.min(), heatmap.mean())
+        heatmap = heatmap[:, :, 0]
+        heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min())
+        # heatmap = heatmap > 0.01
+        heatmap = (heatmap * 255).astype(np.uint8)
+        colored_heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        overlay = image * 0.3 + colored_heatmap * 0.7
+        # Create a color bar
+        height, width = image.shape[:2]
+        color_bar = create_color_bar(50, width, cv2.COLORMAP_JET)  # Adjust the height and colormap as needed
+        # Add the color bar to the image
+        overlay = overlay.astype(np.uint8)
+        combined_image = add_color_bar_to_image(overlay, color_bar, 'vertical')
+        return cv2.cvtColor(combined_image, cv2.COLOR_RGB2BGR)
     
     def predict(self, input_path:str, output_path:str=None, correspondence:bool=False):
         # read video
@@ -84,52 +122,62 @@ class OpticalFlowModel:
             fps = cap.get(cv2.CAP_PROP_FPS)
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            h = h * 2 if correspondence else h
+            h = h * 2 + 50 if correspondence else h
             
             # declare writing video
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             writer = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
 
-        
         # Read first frame
         ret, frame1 = cap.read()
         if not ret:
             print("Error: cannot read first frame")
             return
-        img1 = self.frame_to_tensor(frame1)
         
         total_model_time = 0.0
         idx = 0
-        optical_flows = []
+        optical_flows, heatmaps = [], []
         with torch.no_grad():
             while True:
                 ret, frame2 = cap.read()
                 if not ret:
                     break
-                img2 = self.frame_to_tensor(frame2)
-
-                # Pad input to multiple of 8
-                padder = InputPadder(img1.shape)
-                i1, i2 = padder.pad(img1, img2)
-
-                # Compute flow
-                t0 = time.time()
-                _, flow_up = self.model(i1, i2, iters=20, test_mode=True)
-                t1 = time.time()
-                total_model_time += (t1 - t0)
+                frame1_rgb = cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB)
+                frame2_rgb = cv2.cvtColor(frame2, cv2.COLOR_BGR2RGB)
+                frame1_rgb = torch.tensor(frame1_rgb, dtype=torch.float32).permute(2, 0, 1)
+                frame2_rgb = torch.tensor(frame2_rgb, dtype=torch.float32).permute(2, 0, 1)
+                frame1_rgb = frame1_rgb[None].to(self.device)
+                frame2_rgb = frame2_rgb[None].to(self.device)
                 
-                # Visualize and save
+                # inference
+                t0 = time.time()
+                flow, info= self.calc_flow(frame1_rgb, frame2_rgb)
+                total_model_time += (time.time() - t0)
+                heatmap = self.get_heatmap(info)
+                
+                # add to annotation
+                flow_store = flow.detach().cpu().numpy().tolist()
+                heatmap_store = heatmap.detach().cpu().numpy().tolist()
+                optical_flows.append(flow_store)
+                heatmaps.append(heatmap_store)
                 if output_path:
-                    out_frame = self.viz(img1, flow_up, correspondence)
-                    writer.write(out_frame)
-                    
-                # adjust to let it writable to json
-                flow_up = flow_up.cpu().numpy().tolist()
-                optical_flows.append(flow_up)
+                    flow_vis = flow_to_image(flow[0].permute(1, 2, 0).cpu().numpy(), convert_to_bgr=True)
+                    if correspondence:
+                        heatmap_vis = self.vis_heatmap(frame1_rgb[0].permute(1, 2, 0).cpu().numpy(), heatmap[0].permute(1, 2, 0).cpu().numpy())
+                        vis = np.concatenate((heatmap_vis, flow_vis), axis=0)
+                        # print(vis.shape)
+                        # print(flow_vis.shape)
+                        # print(heatmap_vis.shape)
+                        # print(w, h)
+                    else:
+                        vis = flow_vis
+                        # print(vis.shape)
+                        # print(w, h)
+                    writer.write(vis)
 
                 # Next
-                img1 = img2
+                frame1 = frame2
                 idx += 1
 
         cap.release()
@@ -140,23 +188,20 @@ class OpticalFlowModel:
         # complete
         zero_flow = np.zeros_like(np.array(optical_flows[0]))
         optical_flows.append(zero_flow.tolist())
+        zero_heatmap = np.zeros_like(np.array(heatmaps[0]))
+        heatmaps.append(zero_heatmap)
         
         # calculate fps
         exec_fps = idx / total_model_time if total_model_time > 0 else float('inf')
         print(f"Done. Model inference: {idx} frames in {total_model_time:.2f}s → {exec_fps:.2f} FPS")
-        return {"optical_flows":optical_flows, "stat":{"exec_fps": exec_fps}}
-        
+        return {"optical_flows":optical_flows, "heatmaps":heatmaps, "stat":{"exec_fps": exec_fps}}
+
 if __name__ == "__main__":
     import sys
-    import numpy as np
-    import torch 
     input_path = sys.argv[1]
-    output_path = sys.argv[2]
-    opt = OpticalFlowModel()
-    outs = opt.predict(input_path=input_path, output_path=output_path, correspondence=False) 
-    # nup = []
-    # for x in outs["optical_flows"]:
-    #     out_ = opt.viz(flo=torch.from_numpy(np.array(x)))
-    #     nup.append(out_)
+    output_path = sys.argv[2]   
+    opt = OpticalFlowModel(device="cuda", model_url_name="MemorySlices/Tartan-C-T-TSKH-spring540x960-M", cfg="features/SEA_RAFT/config/eval/spring-M.json")
+    result = opt.predict(input_path=input_path, output_path=output_path, correspondence=True)
+    optical_flows = result["optical_flows"]
+    print(np.array(optical_flows).shape)
     
-    # np.save("output/test.npy", np.array(nup))

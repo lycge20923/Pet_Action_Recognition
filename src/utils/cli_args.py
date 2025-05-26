@@ -113,15 +113,14 @@ class PoseEstimationArguments:
 
 @dataclass
 class OpticalFlowArguments:
-    model_dir: str = field(
-        default="models/of",
-        metadata={"help":"Dir storing models"}
-    )
-    model_name: str =field(
-        default="things",
+    model_url_name: str =field(
+        default="MemorySlices/Tartan-C-T-TSKH-spring540x960-M",
         metadata={"help":"model name for optical flow"}
     )
-    
+    cfg: str = field(
+        default="features/SEA_RAFT/config/eval/spring-M.json",
+        metadata={"help":"The config for initiate optical flow model"}
+    )
 
 @dataclass
 class OutputArguments:
