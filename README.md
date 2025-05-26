@@ -59,7 +59,7 @@ This project aims to recognize and classify various actions performed by pets (i
 * In this step, we would refer [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose) to extract skeleton information. Conduct: 
 
     ```
-    python -m src.data_processing.skeleton_extraction
+    python -m src.data_processing.feature_extraction
     ```
 
 ### Train-Val Split

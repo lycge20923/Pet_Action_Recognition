@@ -5,7 +5,7 @@ import torch
 DEFAULT_ACTIONS_LIST = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
            "Coughing", "Seizures", "Vomiting", "Abnormal Movement"]
 DEFAULT_SKELETON_LIST = [[0, 1], [0, 2], [1, 2], [2, 3], [3, 4], [3, 5], [5, 6], [6, 7], [3, 8], [8, 9], [9, 10], [4, 14], [14, 15], [15, 16], [4, 11], [11, 12], [12, 13]]
-DILATIONS_LIST = [1, 2, 3]
+DILATIONS_LIST = [1] # [1, 2, 3]
 @dataclass
 class DataArguments:
     actions: List[str] = field(
@@ -24,9 +24,13 @@ class DataArguments:
         default="segmented",
         metadata={"help": "Segmented dataset dir name"}
     )
-    pe_dir_name: str = field(
-        default="pose_estimation",
+    feature_extract_dir_name: str = field(
+        default="feature_extracted",
         metadata={"help": "Pose_estimation dataset dir name"}
+    )
+    optical_flow_sub_dir_name: str = field(
+        default="optical_flow",
+        metadata={"help":"Sub dir name for storing numpy for each video"}
     )
     trainsplit_dir_name: str = field(
         default="train_split",
@@ -96,6 +100,18 @@ class PoseEstimationArguments:
     )
 
 @dataclass
+class OpticalFlowArguments:
+    model_dir: str = field(
+        default="models/of",
+        metadata={"help":"Dir storing models"}
+    )
+    model_name: str =field(
+        default="things",
+        metadata={"help":"model name for optical flow"}
+    )
+    
+
+@dataclass
 class OutputArguments:
     output_dir: str = field(
         default="output",
@@ -139,6 +155,10 @@ class ModelArguments:
     multihead_emb_dim: int = field(
         default=128, 
         metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
+    )
+    add_velocity: bool = field(
+        default=False,
+        metadata={"help":"Add (x_diff, y_diff) in information of keypoints"}
     )
     
 @dataclass
@@ -195,11 +215,11 @@ class TrainingArguments:
         metadata={"help": "Device to use for training (e.g., 'cuda', 'cpu')."}
     )
     epochs: int = field(
-        default=1000,
+        default=2000,
         metadata={"help": "Total number of training epochs."}
     )
     batch_size: int = field(
-        default=16,
+        default=64,
         metadata={"help": "Batch size for training and evaluation."}
     )
     learning_rate: float = field(
@@ -231,7 +251,7 @@ class TrainingArguments:
         metadata={"help":"Saving dir for training"}
     )
     patient_epochs: int = field(
-        default= 100, 
+        default= 1000, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
     add_contrastive_loss: bool = field(

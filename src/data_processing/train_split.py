@@ -99,7 +99,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     # load + stats
-    fp = os.path.join(args.data_dir, args.pe_dir_name, args.annotation_file_name)
+    fp = os.path.join(args.data_dir, args.feature_extract_dir_name, args.annotation_file_name)
     with open(fp) as f:
         anns = json.load(f)
     logger.info(f"Loaded {len(anns)} raw annotations")
