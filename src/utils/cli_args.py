@@ -40,10 +40,6 @@ class DataArguments:
         default="feature_extracted",
         metadata={"help": "Pose_estimation dataset dir name"}
     )
-    optical_flow_sub_dir_name: str = field(
-        default="optical_flow",
-        metadata={"help":"Sub dir name for storing numpy for each video"}
-    )
     trainsplit_dir_name: str = field(
         default="train_split",
         metadata={"help":"After 5-fold split"}

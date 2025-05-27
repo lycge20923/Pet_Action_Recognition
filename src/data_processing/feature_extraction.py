@@ -12,8 +12,28 @@ from features.pose_estimation import PoseEstimationModel
 from features.optical_flow import OpticalFlowModel
 from ..utils.logging_utils import setup_logger
 
+def normalize_keypoints(keypoints, bboxes, num_nodes):
+    """
+    Normalize each keypoint in a frame relative to its bounding box.
+    If either keypoints or bboxes is empty, return a single [0,0,0].
+    """
+    if not keypoints or not bboxes or len(bboxes) != 4:
+        return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
+    x1, y1, x2, y2 = bboxes
+    width = x2 - x1
+    height = y2 - y1
+    if width <= 0 or height <= 0:
+        return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
+    normalized = []
+    for x, y, c in keypoints:
+        nx = (x - x1) / width
+        ny = (y - y1) / height
+        normalized.append([nx, ny, c])
+    return normalized
+
+
 def crop_and_save_video(input_path: str,
-                        bbox_annotations: list,
+                        bbox_annotation: list,
                         output_path: str,
                         resize_scale: tuple):
     cap = cv2.VideoCapture(input_path)
@@ -29,7 +49,7 @@ def crop_and_save_video(input_path: str,
         if not ret:
             break
 
-        bbox = bbox_annotations[frame_idx].get("bboxes", None)
+        bbox = bbox_annotation[frame_idx]
         if bbox is None or len(bbox) == 0:
             bbox = prev_bbox
         else:
@@ -101,9 +121,9 @@ def main():
     logger.info(f"Input Directory: {videos_dir}")
     
     # set for annotation
-    pe_dir = os.path.join(data_args.data_dir, data_args.feature_extract_dir_name)
-    of_dir = os.path.join(pe_dir, data_args.optical_flow_sub_dir_name)
-    os.makedirs(of_dir, exist_ok=True)
+    feature_extraction_dir = os.path.join(data_args.data_dir, data_args.feature_extract_dir_name)
+    np_save_dir = os.path.join(feature_extraction_dir, "npz")
+    os.makedirs(np_save_dir, exist_ok=True)
     
     # for each sample, it would be 
     # {"id":id, 
@@ -137,7 +157,7 @@ def main():
             
             # write pose estimation 
             keypoints_all_frames, bboxes_all_frames = result_pe["keypoints"], result_pe["bboxes"]
-            bbox_pe_annotation = []
+            bbox_pe_annotation, bbox_annotation = [], []
             for keypoints_, bboxes_ in zip(keypoints_all_frames, bboxes_all_frames):
                 if isinstance(keypoints_, dict):
                     keypoints = list(keypoints_.items())  # [(id, array), ...]
@@ -152,14 +172,18 @@ def main():
                 else:
                     keypoints = [[float(ele[1]), float(ele[0]), float(ele[2])] for ele in keypoints[0][1]]
                     bboxes = bboxes_.tolist()[0]
-                bbox_pe_annotation.append({"keypoints": keypoints, "bboxes": bboxes})
+                
+                bbox_annotation.append(bboxes)
+                normalized_keypoints = normalize_keypoints(keypoints, bboxes, num_nodes=data_args.num_nodes)
+                bbox_pe_annotation.append(normalized_keypoints)
+                
             
             # --- bbox crop, resize, and store ---
             # output
             tmp_file_path = "temp.mp4"
             crop_and_save_video(
                 input_path=input_path,
-                bbox_annotations=bbox_pe_annotation,
+                bbox_annotation=bbox_annotation,
                 output_path=tmp_file_path,
                 resize_scale=of_args.input_model_size
             )
@@ -171,14 +195,15 @@ def main():
             # write optical flow
             optical_flow_all_frames = result_of["optical_flows"]
             flows = np.stack(optical_flow_all_frames, axis=0)  
-            min_val = flows.min()
-            max_val = flows.max()
-            scale   = max_val - min_val + 1e-8
-            flows_uint8 = ((flows - min_val) / scale * 255.0).astype(np.uint8)
-            np.savez_compressed(os.path.join(of_dir, f"{id_:04d}.npz"),
-                    flows=flows_uint8,
-                    min_val=min_val,
-                    max_val=max_val)
+            mn, mx = flows.min(), flows.max()
+            flows_uint8 = ((flows - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
+            
+            # ---save annotations ---
+            keypoints_arr = np.array(bbox_pe_annotation)
+            output_path = os.path.join(np_save_dir, f"{id_:04d}.npz")
+            np.savez_compressed(output_path,
+                    keypoints=keypoints_arr,
+                    optical_flows=flows_uint8)
             
             exec_fps_pe = result_pe["stat"]["exec_fps"]
             keypoint_detection_rate = result_pe["stat"]["keypoint_detection_rate"]
@@ -186,7 +211,7 @@ def main():
             exec_fps_of = result_of["stat"]["exec_fps"]
             
             # write annotation
-            annotation["data"] = bbox_pe_annotation
+            annotation["feature_file_path"] = output_path
             annotation["keypoint_detection_rate"] = keypoint_detection_rate
             
             txt = f"Input:{os.path.basename(input_path)}, (Pose Estimation)Execution FPS: {exec_fps_pe:.4f}, (Pose Estimation)Keypoints Detection Rate: {keypoint_detection_rate:.4f}, (Optical Flow)Execution FPS:{exec_fps_of:.4f}"
@@ -204,7 +229,7 @@ def main():
     logger.info(txt)
     
     # write annotation
-    with open(os.path.join(pe_dir, data_args.annotation_file_name), 'w') as f:
+    with open(os.path.join(feature_extraction_dir, data_args.annotation_file_name), 'w') as f:
         json.dump(annotations, f, indent=4)
 
 if __name__ == "__main__":
