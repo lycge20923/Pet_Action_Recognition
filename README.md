@@ -64,18 +64,21 @@ This project aims to recognize and classify various actions performed by pets (i
 
 * If you don't conduct video stabilization, make sure to set ```skip_stabilization = True``` in ```src/utils/cli_args.py```
 
-<!-- TODO:Adjust 
-### Obtain Pose Estimation Dataset
+### Obtain Information/Feature(keypoints and optical flows)
 
-* In this step, we would refer [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose) to extract skeleton information. Conduct: 
+* In this step, we would refer 
+
+    1. [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose): extract skeleton information. 
+
+    2. [SEA-RAFT](https://github.com/princeton-vl/SEA-RAFT): extract optical flow information.
 
     ```
     python -m src.data_processing.feature_extraction
-    ``` -->
+    ```
 
 ### Train-Val Split
 
-* In this step, it reads and filters keypoint annotations, performs a 5-fold split by source video, samples fixed-size frame windows, normalizes keypoints within bounding boxes, balances class samples, and outputs train/validation JSON files. Conduct:
+* In this step, it reads annotations, performs a 5-fold split by source video, samples fixed-size frame windows, balances class samples, and outputs train/validation JSON files. Conduct:
 
     ```
     python -m src.data_processing.train_split
