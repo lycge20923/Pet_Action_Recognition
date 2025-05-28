@@ -1,148 +1,171 @@
 import os
 import json
-import random
 import logging
+import numpy as np
+import random
+from tqdm import tqdm
 from collections import defaultdict, Counter
 
-import numpy as np
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedGroupKFold
 
 from ..utils.cli_args import DataArguments
 from ..utils.logging_utils import setup_logger
 
-def normalize_keypoints(keypoints, bboxes, num_nodes):
-    """
-    Normalize each keypoint in a frame relative to its bounding box.
-    If either keypoints or bboxes is empty, return a single [0,0,0].
-    """
-    if not keypoints or not bboxes or len(bboxes) != 4:
-        return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
-    x1, y1, x2, y2 = bboxes
-    width = x2 - x1
-    height = y2 - y1
-    if width <= 0 or height <= 0:
-        return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
-    normalized = []
-    for x, y, c in keypoints:
-        nx = (x - x1) / width
-        ny = (y - y1) / height
-        normalized.append([nx, ny, c])
-    return normalized
 
-def sample_frames_from_window(window_data, num_samples):
-    """Evenly pick `num_samples` frames from `window_data`."""
-    idx = np.linspace(0, len(window_data) - 1, num_samples, dtype=int)
-    return [window_data[i] for i in idx]
+def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir):
+    """
+    For each clip annotation, slice into windows, sample frames,
+    save each window's features once, and return a flat list of metadata.
+    """
+    all_meta = []
+    sample_id = 0
+    for ann in tqdm(annotations, desc="Saving windows"):
+        data = np.load(ann["feature_file_path"])
+        kps = data["keypoints"]
+        ofs = data["optical_flows"]
+        n_windows = kps.shape[0] // window_size
 
-def generate_window_samples(annotations, window_size, num_samples, num_nodes):
-    """For each ann, split its frames into windows, sample frames, then normalize keypoints."""
-    by_cat = defaultdict(list)
-    for ann in annotations:
-        frames = ann["data"]
-        n_windows = len(frames) // window_size
         for w in range(n_windows):
-            window = frames[w*window_size : (w+1)*window_size]
-            sampled = sample_frames_from_window(window, num_samples)
-            # normalize every sampled frame's keypoints
-            normalized_data = []
-            for frame in sampled:
-                kps = frame.get("keypoints", [])
-                bbox = frame.get("bboxes", [])
-                normalized_data.append(normalize_keypoints(kps, bbox, num_nodes))
-            sample = {
-                "video_name":      ann["video_name"],
-                "source_video_id": ann["source_video_id"],
-                "action_id":     ann["action_id"],
-                "window_index":    w,
-                "data":            normalized_data,
-                "sampled_frames":  sampled
-            }
-            by_cat[ann["action_id"]].append(sample)
-    return by_cat
+            idxs = np.linspace(
+                w * window_size,
+                (w + 1) * window_size - 1,
+                num_samples,
+                dtype=int
+            )
+            kp_s = kps[idxs]
+            of_s = ofs[idxs]
 
-def balanced_category_sampling(samples_by_cat):
-    """Downsample each category to the smallest size, preferring one per source."""
-    min_n = min(len(lst) for lst in samples_by_cat.values())
-    balanced = []
-    for samples in samples_by_cat.values():
-        grouped = defaultdict(list)
-        for s in samples:
-            grouped[s["source_video_id"]].append(s)
-        pick = []
-        for src in random.sample(list(grouped), len(grouped)):
-            if len(pick) >= min_n:
-                break
-            pick.append(grouped[src][0])
-        if len(pick) < min_n:
-            rest = [s for s in samples if s not in pick]
-            pick += random.sample(rest, min_n - len(pick))
-        balanced.extend(pick)
-    return balanced
+            feat_path = os.path.join(np_save_dir, f"{sample_id:06d}.npz")
+            np.savez_compressed(
+                feat_path,
+                keypoints=kp_s,
+                optical_flows=of_s
+            )
+
+            all_meta.append({
+                "sample_id":        sample_id,
+                "feature_file":     feat_path,
+                "video_name":       ann["video_name"],
+                "source_video_id":  ann["source_video_id"],
+                "action_id":        ann["action_id"],
+                "window_index":     w
+            })
+            sample_id += 1
+
+        del data, kps, ofs
+    return all_meta
+
 
 def compute_basic_stats(annotations, logger):
-    """Log counts, distributions of categories, sources, rates, frames."""
-    logger.info(f"Total samples: {len(annotations)}")
-    cats = [a["action_id"] for a in annotations]
-    logger.info(f"Categories: {Counter(cats)}")
-    srcs = [a["source_video_id"] for a in annotations]
-    logger.info(f"Video sources: {len(set(srcs))}, top10: {Counter(srcs).most_common(10)}")
-    rates = np.array([a.get("keypoint_detection_rate", 0) for a in annotations])
-    logger.info(f"KPR min/max/mean/med: {rates.min():.3f}/{rates.max():.3f}/{rates.mean():.3f}/{np.median(rates):.3f}")
-    lens = np.array([len(a["data"]) for a in annotations])
-    logger.info(f"Frames per sample min/max/mean/med: {lens.min()}/{lens.max()}/{lens.mean():.1f}/{np.median(lens):.1f}")
+    logger.info(f"Raw annotations: {len(annotations)} clip videos")
+    cats = [a['action_id'] for a in annotations]
+    logger.info(f"Action distribution across clips: {Counter(cats)}")
+    srcs = [a['source_video_id'] for a in annotations]
+    logger.info(f"Distinct source_video_id count: {len(set(srcs))}")
+
 
 def main():
     logger = setup_logger(__file__, level=logging.INFO)
-    args   = DataArguments()
-    base   = os.path.splitext(args.annotation_file_name)[0]
+    args = DataArguments()
+    base = os.path.splitext(args.annotation_file_name)[0]
     out_dir = os.path.join(args.data_dir, args.trainsplit_dir_name)
-    os.makedirs(out_dir, exist_ok=True)
+    np_save_dir = os.path.join(out_dir, "npz")
+    os.makedirs(np_save_dir, exist_ok=True)
 
-    # load + stats
-    fp = os.path.join(args.data_dir, args.feature_extract_dir_name, args.annotation_file_name)
-    with open(fp) as f:
-        anns = json.load(f)
-    logger.info(f"Loaded {len(anns)} raw annotations")
-    compute_basic_stats(anns, logger)
+    # load and filter clip-level annotations
+    ann_fp = os.path.join(
+        args.data_dir,
+        args.feature_extract_dir_name,
+        args.annotation_file_name
+    )
+    with open(ann_fp) as f:
+        raw_anns = json.load(f)
+    compute_basic_stats(raw_anns, logger)
+    raw_anns = [
+        a for a in raw_anns if a.get('keypoint_detection_rate', 0) >= args.min_kp_rate
+    ]
+    logger.info(f"After filter: {len(raw_anns)} clip videos remain")
 
-    # filter by rate
-    anns = [a for a in anns if a.get("keypoint_detection_rate", 0) >= args.min_kp_rate]
-    logger.info(f"After filter: {len(anns)} samples")
+    # 1) window generation + save .npz once
+    all_samples = generate_and_save_windows_once(
+        raw_anns,
+        window_size=args.window_size,
+        num_samples=args.num_samples,
+        np_save_dir=np_save_dir
+    )
+    
+    # # for temp test
+    # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'w') as f:
+    #     json.dump(all_samples, f)  
+    
+    # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'r') as f:
+    #     all_samples = json.load(f)
+     
+    logger.info(f"Saved {len(all_samples)} window samples (.npz)")
 
-    # stratify by source -> count of unique categories
-    src2cats = defaultdict(set)
-    for a in anns:
-        src2cats[a["source_video_id"]].add(a["action_id"])
-    sources = list(src2cats)
-    labels  = [len(src2cats[s]) for s in sources]
+    # 2) one-time StratifiedGroupKFold on source -> fold map
+    sources = sorted({s['source_video_id'] for s in all_samples})
+    # label each source by how many distinct actions it has
+    src_labels = [
+        len({s['action_id'] for s in all_samples if s['source_video_id'] == src})
+        for src in sources
+    ]
+    sgkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+    source2fold = {}
+    for fold, (_, val_idx) in enumerate(sgkf.split(sources, src_labels, groups=sources)):
+        for idx in val_idx:
+            source2fold[sources[idx]] = fold
 
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    for fold, (tr_idx, vl_idx) in enumerate(skf.split(sources, labels)):
-        tr_src = {sources[i] for i in tr_idx}
-        vl_src = {sources[i] for i in vl_idx}
-        tr_anns = [a for a in anns if a["source_video_id"] in tr_src]
-        vl_anns = [a for a in anns if a["source_video_id"] in vl_src]
-        logger.info(f"[Fold{fold}] train_samples={len(tr_anns)}, val_samples={len(vl_anns)}")
+    # 3) build per-(action, source) queues
+    queues = defaultdict(lambda: defaultdict(list))
+    for s in all_samples:
+        queues[s['action_id']][s['source_video_id']].append(s)
+    # sort each queue by sample_id
+    for act, src_dict in queues.items():
+        for src, lst in src_dict.items():
+            random.shuffle(lst)
 
-        # train: window + balance
-        by_cat = generate_window_samples(tr_anns, window_size=args.window_size, num_samples=args.num_samples, num_nodes=args.num_nodes)
-        raw_counts = {c: len(l) for c, l in by_cat.items()}
-        logger.info(f"[Fold{fold}] raw windows per cat: {raw_counts}")
-        balanced = balanced_category_sampling(by_cat)
-        random.shuffle(balanced)
-        logger.info(f"[Fold{fold}] balanced windows total={len(balanced)}")
+    # 4) round-robin sampling until difference > allow_diff
+    allow_diff = getattr(args, 'fold_allow_diff', 0)
+    counts = Counter({act: 0 for act in queues})
+    final_samples = []
+    round_k = 1
+    while True:
+        round_samples = []
+        for act, src_dict in queues.items():
+            for src, lst in src_dict.items():
+                if len(lst) >= round_k:
+                    samp = lst[round_k-1].copy()
+                    samp['fold'] = source2fold[src]
+                    round_samples.append(samp)
+        if not round_samples:
+            break
+        # compute prospective counts
+        temp_counts = counts.copy()
+        for s in round_samples:
+            temp_counts[s['action_id']] += 1
+        # stop if difference exceeds threshold
+        if max(temp_counts.values()) - min(temp_counts.values()) > allow_diff:
+            break
+        # accept this round
+        final_samples.extend(round_samples)
+        counts = temp_counts
+        round_k += 1
 
-        with open(os.path.join(out_dir, f"{base}_fold{fold}_train_windows.json"), "w") as f:
-            json.dump(balanced, f, indent=4)
+    # log per-fold class distribution
+    for fold in range(5):
+        cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
+        sorted_cnt = {action: cnt[action] for action in sorted(cnt)}
+        logger.info(f"[Fold {fold}] samples per action: {sorted_cnt}")
 
-        # val: window only
-        by_cat_v = generate_window_samples(vl_anns, window_size=args.window_size, num_samples=args.num_samples, num_nodes=args.num_nodes)
-        flat_v = [s for lst in by_cat_v.values() for s in lst]
-        random.shuffle(flat_v)
-        logger.info(f"[Fold{fold}] val windows total={len(flat_v)}")
 
-        with open(os.path.join(out_dir, f"{base}_fold{fold}_val_windows.json"), "w") as f:
-            json.dump(flat_v, f, indent=4)
+    # save final metadata
+    meta_fp = os.path.join(out_dir, f"{base}_windows_metadata.json")
+    with open(meta_fp, 'w') as f:
+        json.dump(final_samples, f, indent=2)
+    logger.info(
+        f"Generated {len(final_samples)} round-robin balanced samples (allow_diff={allow_diff})"
+    )
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

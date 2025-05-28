@@ -44,6 +44,10 @@ class DataArguments:
         default="train_split",
         metadata={"help":"After 5-fold split"}
     )
+    fold_allow_diff: int = field(
+        default= 150, 
+        metadata={"help": "The maximum for the difference of the number of samples"}
+    )
     metadata_name: str = field(
         default="metadata.csv",
         metadata={"help": "Name of the metadata file"}

@@ -194,16 +194,15 @@ def main():
             
             # write optical flow
             optical_flow_all_frames = result_of["optical_flows"]
-            flows = np.stack(optical_flow_all_frames, axis=0)  
-            mn, mx = flows.min(), flows.max()
-            flows_uint8 = ((flows - mn) / (mx - mn + 1e-8) * 255).astype(np.uint8)
-            
+            flows = np.stack(optical_flow_all_frames, axis=0)
+            flows_f32 = flows.astype(np.float32)  
+
             # ---save annotations ---
             keypoints_arr = np.array(bbox_pe_annotation)
             output_path = os.path.join(np_save_dir, f"{id_:04d}.npz")
             np.savez_compressed(output_path,
                     keypoints=keypoints_arr,
-                    optical_flows=flows_uint8)
+                    optical_flows=flows_f32)
             
             exec_fps_pe = result_pe["stat"]["exec_fps"]
             keypoint_detection_rate = result_pe["stat"]["keypoint_detection_rate"]
