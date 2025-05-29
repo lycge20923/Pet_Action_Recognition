@@ -9,7 +9,7 @@ import numpy as np
 from ..utils.cli_args import DataArguments, ModelArguments, AugmentationArguments
 
 
-class JointsDataset(Dataset):
+class KpOfDataset(Dataset):
     def __init__(self,
                  data_params: DataArguments,
                  aug_params: AugmentationArguments,
@@ -48,11 +48,22 @@ class JointsDataset(Dataset):
         # load keypoints from the .npz window file
         feat_path = self.annotations[index]["feature_file"]
         data = np.load(feat_path)
-        keypoints_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
-        # if self.add_optical_flow:
-        #     optical_flows_np = data["optical_flows"].astype(np.float32)
+        
+        # --- load feature and label --- 
+        # label
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)
 
+        # optical flows
+        optical_flows_tensor = None
+        if self.add_optical_flow:
+            optical_flows_np = data["optical_flows"].astype(np.float32)
+            optical_flows_np = optical_flows_np.squeeze(axis=1)
+            optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3)
+            optical_flows_tensor = torch.from_numpy(optical_flows_np).float()
+        
+        # keypoints
+        keypoints_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
+        
         # Validate shape
         expected_shape = (self.T, self.num_joints, self.num_coords)
         if keypoints_np.shape != expected_shape:
@@ -115,10 +126,7 @@ class JointsDataset(Dataset):
         # print(keypoints_tensor.shape)
         # print(optical_flows_np.shape)
         
-        if self.add_optical_flow:
-            return keypoints_tensor, label
-        else:
-            return keypoints_tensor, label
+        return keypoints_tensor, optical_flows_tensor, label
 
     def _get_center(self, keypoints_with_conf: np.ndarray) -> np.ndarray:
         """
@@ -329,7 +337,7 @@ class JointsDataset(Dataset):
                         output_data[idx, :, :] = output_data[idx + 1, :, :]
         return output_data
 
-class SiameseJointsDataset(Dataset):
+class SiameseKpOfDataset(Dataset):
     """
     Wrapper to produce pairs for joint CrossEntropy + Contrastive training.
     Returns:
@@ -337,13 +345,14 @@ class SiameseJointsDataset(Dataset):
       lab1, lab2: labels for CE loss
       y: binary (0: same, 1: different) for ContrastiveLoss
     """
-    def __init__(self, base_dataset: JointsDataset):
+    def __init__(self, base_dataset: KpOfDataset, data_args:DataArguments):
         self.base = base_dataset
         # Build mapping label -> indices for sampling
         self.label_to_indices = {}
-        for idx in range(len(self.base)):
-            _, lab = self.base[idx]
-            lab = int(lab.item())
+        with open(os.path.join(data_args.data_dir, data_args.trainsplit_dir_name, "annotation_windows_metadata.json"), 'r') as f:
+            self.annotations = json.load(f)
+        for idx, sample_annotation in enumerate(self.base.annotations):
+            lab = int(sample_annotation['action_id'])
             self.label_to_indices.setdefault(lab, []).append(idx)
         self.labels = list(self.label_to_indices.keys())
 
@@ -351,7 +360,7 @@ class SiameseJointsDataset(Dataset):
         return len(self.base)
 
     def __getitem__(self, index):
-        x1, lab1 = self.base[index]
+        kp1, flow1, lab1 = self.base[index]
         lab1_int = int(lab1.item())
 
         # obtain another sample
@@ -363,8 +372,8 @@ class SiameseJointsDataset(Dataset):
             idx2 = random.choice(self.label_to_indices[neg_label])
             y = 1.0
 
-        x2, lab2 = self.base[idx2]
-
+        kp2, flow2, lab2 = self.base[idx2]
+        
         y = torch.tensor(y, dtype=torch.float32)
         
-        return (x1, x2), (lab1, lab2), y
+        return (kp1, kp2), (flow1, flow2), (lab1, lab2), y

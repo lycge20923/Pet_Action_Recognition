@@ -6,15 +6,16 @@ import numpy as np
 import os
 import random
 import wandb
+from tqdm import tqdm
 
 
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 
-from src.models.model import ActionRecognitionModel
+from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
-from src.dataset.dataset import JointsDataset, SiameseJointsDataset
+from src.dataset.dataset import KpOfDataset, SiameseKpOfDataset
 from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
 
 def setup_experiments():
@@ -70,8 +71,8 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
     
-    val_dataset = JointsDataset(data_params, aug_params_eval, model_params, istrain=False)
-    train_dataset = JointsDataset(data_params, aug_params_train, model_params, istrain=True)
+    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False)
+    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True)
     
     # calculate the dataset size
     train_size = len(train_dataset)
@@ -79,9 +80,13 @@ def prepare_dataloaders(data_params:DataArguments,
     print(f"[Dataset sizes] train: {train_size}, val: {val_size}")
 
     # for calculating weights for cross entropy loss
+    print("Start Calculating ratio of each class")
+    with open(os.path.join(data_params.data_dir, data_params.trainsplit_dir_name, "annotation_windows_metadata.json"), 'r') as f:
+        annotations = json.load(f)
+        
     all_labels = []
-    for i in range(len(train_dataset)):
-        _, label = train_dataset[i]
+    for annotation in annotations:
+        label = annotation["action_id"]
         all_labels.append(int(label))
     counts = Counter(all_labels)
     num_classes = len(counts)
@@ -93,14 +98,15 @@ def prepare_dataloaders(data_params:DataArguments,
 
     # for contrastive learning
     if train_params.add_contrastive_loss:
-        train_dataset = SiameseJointsDataset(train_dataset)
+        train_dataset = SiameseKpOfDataset(train_dataset, data_params)
     
-    sample, _ = val_dataset[0]            # sample.shape = (C, T, V)
+    sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
     if isinstance(sample, torch.Tensor):
         sample = sample.cpu().numpy()
     sample.mean(axis=1)
     coords = sample.mean(axis=1).T 
     
+    print("Start to add to Dataloader")
     # build dataloader
     train_loader = DataLoader(
         train_dataset,
@@ -133,12 +139,14 @@ def build_model_and_optimizer(model_params:ModelArguments,
         cross_entropy_loss = torch.nn.CrossEntropyLoss() 
     contrastive_loss = ContrastiveLoss()
     
-    # # set model
-    # if not train_params.add_contrastive_loss:
-    #     model = ST_GCN(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations).to(train_params.device)
-    # else:
-    #     model = STGCN_MultiHead(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations, embed_dim=model_params.multihead_emb_dim).to(train_params.device)
-    model = ActionRecognitionModel(train_params, model_params, data_params, coords)
+    # set model
+    base_model = ActionRecognitionModel(train_params, model_params, data_params, coords)
+    if not train_params.add_contrastive_loss:
+        model = base_model
+    else:
+        num_classes_for_wrapper = model_params.num_classes
+        model = ContrastiveActionWrapper(base_model, model_params.multihead_emb_dim, num_classes_for_wrapper)
+    model = model.to(train_params.device)
     
     # set optimizer and scheduler
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
@@ -176,12 +184,13 @@ def train_one_epoch(model,
         batch_loss_ce_val = 0.0 
         
         if train_params.add_contrastive_loss and contrastive_loss: 
-            (x1, x2), (lab1, lab2), y = batch_data
-            x1, x2 = x1.to(device), x2.to(device)
+            (kp1, kp2), (flow1, flow2), (lab1, lab2), y = batch_data
+            kp1, kp2 = kp1.to(device), kp2.to(device)
+            flow1, flow2 = flow1.to(device), flow2.to(device)
             lab1, lab2 = lab1.to(device), lab2.to(device)
             y = y.to(device)
-            emb1, logit1 = model(x1)
-            emb2, logit2 = model(x2)
+            emb1, logit1 = model(kp1, flow1)
+            emb2, logit2 = model(kp2 ,flow2)
             
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
@@ -204,11 +213,11 @@ def train_one_epoch(model,
             correct += (pred1 == lab1).sum().item()
             correct += (pred2 == lab2).sum().item()
         else: 
-            data, label = batch_data
-            data = data.to(device)
+            kps, flow, label = batch_data
+            kps, flow = kps.to(device), flow.to(device)
             label = label.to(device)
             
-            _, output = model(data)
+            _, output = model(kps, flow)
 
             batch_loss_ce_tensor = cross_entropy_loss(output, label) 
             batch_loss_ce_val = batch_loss_ce_tensor.item() 
@@ -242,12 +251,12 @@ def val_one_epoch(model, loader, cross_entropy_loss, device, epoch, actions:list
     class_total = torch.zeros(num_classes).to(device)
     
     with torch.no_grad():
-        for data, label in loader:
+        for kps, flow, label in loader:
             
-            data = data.to(device)
+            kps, flow = kps.to(device), flow.to(device)
             label = label.to(device)
 
-            _, output = model(data)
+            _, output = model(kps, flow)
             loss = cross_entropy_loss(output, label)
             current_batch_size = label.size(0)
             total_samples += current_batch_size

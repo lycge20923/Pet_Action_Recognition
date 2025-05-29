@@ -175,7 +175,7 @@ cython_debug/
 
 # some unecessary data
 data/*
-models/*
+models/pe/*
 output/*
 test/*
 wandb/*

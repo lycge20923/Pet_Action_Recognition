@@ -181,8 +181,21 @@ class ModelArguments:
     # )
     add_optical_flow: bool = field(
         default=True,
-        metadata={}
+        metadata={"help":"Whether adding optical flow"}
     )
+    pretrained_weight_dir: str = field(
+        default="models",
+        metadata={"help":"Weights to store pretrained weights"}
+    )
+    I3D_weights_dir_name: str = field(
+        default="I3D",
+        metadata={"help":"Dir to store pretrained weights for I3D"}
+    )
+    I3D_weights_file_name: str = field(
+        default="flow_imagenet.pt",
+        metadata={"help":"I3D pretrained weights file name"}
+    )
+    
     
 @dataclass
 class AugmentationArguments:
@@ -242,7 +255,7 @@ class TrainingArguments:
         metadata={"help": "Total number of training epochs."}
     )
     batch_size: int = field(
-        default=64,
+        default=16,
         metadata={"help": "Batch size for training and evaluation."}
     )
     learning_rate: float = field(

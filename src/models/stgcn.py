@@ -270,39 +270,3 @@ class ST_GCN(nn.Module):
         feat = feat_4d.view(N, -1)
         logits = self.fc(feat_4d).view(N, -1)
         return feat, logits
-
-class STGCN_MultiHead(nn.Module):
-    """
-    ST-GCN backbone with dual heads:
-      - proj_head: for contrastive embedding (normalized)
-      - class_head: for classification logits
-    """
-    def __init__(
-        self,
-        params,
-        data_params,
-        coords: np.ndarray,
-        embed_dim: int = 128
-    ):
-        super().__init__()
-        # Backbone unchanged
-        self.backbone = ST_GCN(
-            params=params,
-            data_params=data_params,
-            coords=coords,
-        )
-        final_ch = params.final_channels
-        num_classes = params.num_classes  
-        # Projection head for contrastive loss
-        self.proj_head  = nn.Linear(final_ch, embed_dim)
-        # Classification head for cross-entropy
-        self.class_head = nn.Linear(final_ch, num_classes)
-
-    def forward(self, x: torch.Tensor):
-        # feat: (N, final_channels)
-        feat, _ = self.backbone(x)
-        # emb: normalized embedding
-        emb = F.normalize(self.proj_head(feat), dim=1)  # MODIFIED: L2-normalize
-        # logits: classification
-        logits = self.class_head(feat)
-        return emb, logits
