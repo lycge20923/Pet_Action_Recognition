@@ -1,3 +1,4 @@
+from collections import Counter
 import dataclasses
 from datetime import datetime
 import json
@@ -5,6 +6,7 @@ import numpy as np
 import os
 import random
 import wandb
+
 
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
@@ -24,7 +26,8 @@ def setup_experiments():
     model_params = ModelArguments(
         intermediate_channels=wandb.config.intermidiate_channels,
         final_channels=wandb.config.final_channels,
-        t_kernel_size=wandb.config.t_kernel_size
+        t_kernel_size=wandb.config.t_kernel_size,
+        dilations=wandb.config.dilations
     )
     train_params = TrainingArguments(
         add_contrastive_loss=wandb.config.add_contrastive_loss,
@@ -69,6 +72,25 @@ def prepare_dataloaders(data_params:DataArguments,
     
     val_dataset = JointsDataset(data_params, aug_params_eval, model_params, istrain=False)
     train_dataset = JointsDataset(data_params, aug_params_train, model_params, istrain=True)
+    
+    # calculate the dataset size
+    train_size = len(train_dataset)
+    val_size   = len(val_dataset)
+    print(f"[Dataset sizes] train: {train_size}, val: {val_size}")
+
+    # for calculating weights for cross entropy loss
+    all_labels = []
+    for i in range(len(train_dataset)):
+        _, label = train_dataset[i]
+        all_labels.append(int(label))
+    counts = Counter(all_labels)
+    num_classes = len(counts)
+    total = sum(counts.values())
+
+    # class weights
+    weights = [ total / (num_classes * counts[i]) for i in range(num_classes)]
+    class_weights = torch.tensor(weights, dtype=torch.float32)
+
     # for contrastive learning
     if train_params.add_contrastive_loss:
         train_dataset = SiameseJointsDataset(train_dataset)
@@ -95,15 +117,20 @@ def prepare_dataloaders(data_params:DataArguments,
         pin_memory=True if train_params.device == "cuda" else False
     )
     
-    return {"data_loader":{"train":train_loader, "val":val_loader}, "center_coords":coords}
+    return {"data_loader":{"train":train_loader, "val":val_loader}, "center_coords":coords, "class_weights":class_weights}
 
 def build_model_and_optimizer(model_params:ModelArguments, 
                               data_params:DataArguments, 
                               train_params:TrainingArguments, 
-                              coords):
+                              coords,
+                              class_weights=None):
     
     # set loss
-    cross_entropy_loss = torch.nn.CrossEntropyLoss()
+    if class_weights is not None:
+        class_weights = class_weights.to(train_params.device)
+        cross_entropy_loss = torch.nn.CrossEntropyLoss(weight=class_weights)
+    else:
+        cross_entropy_loss = torch.nn.CrossEntropyLoss() 
     contrastive_loss = ContrastiveLoss()
     
     # set model
@@ -113,7 +140,7 @@ def build_model_and_optimizer(model_params:ModelArguments,
         model = STGCN_MultiHead(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations, embed_dim=model_params.multihead_emb_dim).to(train_params.device)
     # set optimizer and scheduler
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=0)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=1e-6)
     
     return {"loss":{"cross entropy": cross_entropy_loss, "contrastive learning": contrastive_loss}, "model":model, "optimizer":optimizer, "scheduler":scheduler}
 
@@ -268,9 +295,10 @@ def main():
     loaders = prepare_dataloaders(data_params, aug_params_train, aug_params_eval, model_params, train_params)
     train_loader, val_loader = loaders["data_loader"]["train"], loaders["data_loader"]["val"]
     coords = loaders["center_coords"]
+    class_weights = loaders["class_weights"]
     
     # set model, loss, optimizer, scheduler
-    train_objects = build_model_and_optimizer(model_params, data_params, train_params, coords)
+    train_objects = build_model_and_optimizer(model_params, data_params, train_params, coords, class_weights)
     model = train_objects["model"]
     cross_entropy_loss, contrastive_loss = train_objects["loss"]["cross entropy"], train_objects["loss"]["contrastive learning"]
     optimizer = train_objects["optimizer"]

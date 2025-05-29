@@ -24,25 +24,31 @@ class JointsDataset(Dataset):
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
         trainsplit_dir_name = getattr(data_params, 'trainsplit_dir_name', 'train_split')
-        self.annotation_path = os.path.join(self.data_params.data_dir, trainsplit_dir_name, f"annotation_fold{str(fold_num)}_{self.datatype}_windows.json")
+        annotation_path = os.path.join(self.data_params.data_dir, trainsplit_dir_name, "annotation_windows_metadata.json")
+        with open(annotation_path, 'r') as f:
+            self.annotations = json.load(f)
+        if istrain:
+            self.annotations = [sample for sample in self.annotations if sample['fold'] != fold_num]
+        else:
+            self.annotations = [sample for sample in self.annotations if sample['fold'] == fold_num]
         
         self.T = self.data_params.num_samples
         self.num_joints = self.data_params.num_nodes
         self.num_coords = self.data_params.num_coords # Should be 3 (x,y,conf)
         
-        self._load_annotation() # This might call _generate_keypoints
+        # self._load_annotation() # This might call _generate_keypoints
 
     def __len__(self):
         return len(self.annotations)
 
     def __getitem__(self, index):
         # Load initial data from annotations
-        # Assuming 'data' contains a list of frames, each frame is a list of keypoints [x,y,c]
         # And 'action_id' is the label
-        keypoints_data_list = self.annotations[index]["data"] # This should be (T, num_joints, 3)
+        # load keypoints from the .npz window file
+        feat_path = self.annotations[index]["feature_file"]
+        data = np.load(feat_path)
+        data_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)
-
-        data_np = np.array(keypoints_data_list, dtype=np.float32)
 
         # Validate shape
         expected_shape = (self.T, self.num_joints, self.num_coords)
@@ -58,7 +64,7 @@ class JointsDataset(Dataset):
                 data_np = data_np[:self.T, :, :]
             
             if data_np.shape[1] != self.num_joints or data_np.shape[2] != self.num_coords:
-                 raise ValueError(f"Corrected sample {index} shape {data_np.shape} still incorrect. Expected ({self.T}, {self.num_joints}, {self.num_coords}). Data: {keypoints_data_list}")
+                 raise ValueError(f"Corrected sample {index} shape {data_np.shape} still incorrect. Expected ({self.T}, {self.num_joints}, {self.num_coords}). Data: {data_np}")
 
         # Data augmentation
         if self.aug_params.augment and self.datatype == "train": # Usually only augment training data
@@ -313,170 +319,7 @@ class JointsDataset(Dataset):
                     else: # Replace with next frame
                         output_data[idx, :, :] = output_data[idx + 1, :, :]
         return output_data
-        
-    def _load_annotation(self):
-        # This is a placeholder for your actual annotation loading.
-        # Ensure self.yolo_pose_model_path and self.main_data_dir are set in __init__ if _generate_keypoints is called.
-        # Example for yolo_pose_model_path and main_data_dir (should come from data_params or model_params):
-        self.yolo_pose_model_path = getattr(self.data_params, 'yolo_pose_model_path', None)
-        self.main_data_dir = getattr(self.data_params, 'main_data_dir', None)
 
-
-        if not os.path.exists(self.annotation_path):
-            # Check if necessary paths for generation are provided
-            if not self.yolo_pose_model_path or not self.main_data_dir or \
-               not os.path.exists(self.yolo_pose_model_path) or not os.path.exists(self.main_data_dir):
-                raise ValueError(
-                    f"Annotation file '{self.annotation_path}' not found and cannot generate: "
-                    "Please provide valid 'yolo_pose_model_path' and 'main_data_dir' in DataArguments, "
-                    "or ensure the annotation file exists."
-                )
-            print(f"Annotation file not found at {self.annotation_path}. Attempting to generate keypoints from {self.main_data_dir}...")
-            self._generate_keypoints() # This will populate self.annotations
-            print(f"Annotations generated and saved to {self.annotation_path}")
-        else:
-            print(f"Loading annotations from {self.annotation_path}...")
-            try:
-                with open(self.annotation_path, 'r') as f:
-                    self.annotations = json.load(f)
-                print(f"Loaded {len(self.annotations)} samples.")
-                if not self.annotations:
-                    raise ValueError(f"Annotation file {self.annotation_path} is empty or malformed after loading.")
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Error decoding JSON from {self.annotation_path}: {e}")
-
-
-    def _generate_keypoints(self):
-        """
-        Placeholder for your keypoint generation logic.
-        This method should populate self.annotations with data.
-        Each item in self.annotations should be a dictionary like:
-        {"data": list_of_frames, "action_id": label}
-        where list_of_frames is a list (length T) of lists (length num_joints)
-        of [x, y, confidence] values.
-        """
-        # Ensure ultralytics is installed if this part is used
-        try:
-            from ultralytics import YOLO
-        except ImportError:
-            raise ImportError("ultralytics (YOLO) package is not installed. Please install it to generate keypoints.")
-
-        # make dirs for the new annotation file
-        os.makedirs(os.path.dirname(self.annotation_path), exist_ok=True)
-        
-        print(f"Initializing YOLO pose model from: {self.yolo_pose_model_path}")
-        yolo_pose_model = YOLO(self.yolo_pose_model_path)
-        
-        self.annotations = []
-        # Assuming main_data_dir and data_params.annotation_file_name are for the source annotations
-        main_annotation_file = getattr(self.data_params, 'annotation_file_name', 'default_main_annotation.json')
-        main_annotation_path = os.path.join(self.main_data_dir, main_annotation_file)
-        
-        if not os.path.exists(main_annotation_path):
-            raise FileNotFoundError(f"Main annotation file for generation not found: {main_annotation_path}")
-
-        with open(main_annotation_path, 'r') as f:
-            source_annotations_all_types = json.load(f)
-        
-        # Ensure the key self.datatype (e.g., "train" or "val") exists in the loaded annotations
-        if self.datatype not in source_annotations_all_types:
-            raise KeyError(f"Data type '{self.datatype}' not found in source annotation file: {main_annotation_path}. Available keys: {list(source_annotations_all_types.keys())}")
-
-        source_annotations_for_current_type = source_annotations_all_types[self.datatype]
-        
-        print(f"Processing {len(source_annotations_for_current_type)} video entries for '{self.datatype}' set.")
-
-        for i, data_entry in enumerate(source_annotations_for_current_type):
-            keypoint_sequence_for_video = []
-            # Ensure keys exist in data_entry
-            category = data_entry.get("category", "unknown_category")
-            action = data_entry.get("action", "unknown_action")
-            video_name = data_entry.get("video_name")
-            action_id = data_entry.get("action_id", -1) # Use a default if not present
-
-            if not video_name:
-                print(f"Warning: video_name missing in source annotation entry {i}. Skipping.")
-                continue
-            if action_id == -1:
-                 print(f"Warning: action_id missing in source annotation entry for {video_name}. Skipping or using default.")
-                 # Decide if you want to skip or assign a default label
-
-            video_path = os.path.join(self.main_data_dir, self.datatype, category, action, video_name)
-            
-            if not os.path.exists(video_path):
-                print(f"Warning: Video file not found at {video_path} for entry {i}. Skipping.")
-                continue
-
-            print(f"Generating keypoints for: {video_path}")
-            # Process video with YOLO. Adjust batch size as needed.
-            # stream=True might be more memory efficient for long videos.
-            results_generator = yolo_pose_model(video_path, batch=16, stream=True, verbose=False) 
-            
-            frames_processed_yolo = 0
-            for result in results_generator:
-                frames_processed_yolo += 1
-                # result.keypoints.data is a tensor.
-                # It can be empty if no person is detected.
-                # It can have multiple persons. For ST-GCN usually one person is focused on.
-                # Assuming we take the first detected person's keypoints if multiple.
-                if result.keypoints.data.numel() > 0: # Check if tensor is not empty
-                    # .data gives the tensor, .cpu() moves to CPU, .tolist() converts
-                    # result.keypoints.data shape is [num_persons, num_keypoints, xy_or_xyc]
-                    # We need to select one person, typically the first or most confident.
-                    # For simplicity, taking the first person [0]
-                    person_keypoints_tensor = result.keypoints.data[0].cpu() # Shape [num_keypoints, xyc]
-                    
-                    # Ensure it has 3 channels (x, y, conf). If only 2 (x,y), add conf=1.0
-                    if person_keypoints_tensor.shape[1] == 2: # Only x, y
-                        confidences = torch.ones(person_keypoints_tensor.shape[0], 1, dtype=person_keypoints_tensor.dtype)
-                        person_keypoints_tensor = torch.cat((person_keypoints_tensor, confidences), dim=1)
-
-                    keypoints_list_for_frame = person_keypoints_tensor.tolist()
-                    
-                    # Optional: replace (0,0,c) keypoints with (0,0,0) if (0,0) means invalid for your raw data
-                    # keypoints_list_for_frame = [
-                    #     [0.0, 0.0, 0.0] if kp[0] == 0 and kp[1] == 0 else kp
-                    #     for kp in keypoints_list_for_frame
-                    # ]
-                else:
-                    # No person detected, or no keypoints. Pad with zeros.
-                    keypoints_list_for_frame = [[0.0, 0.0, 0.0]] * self.num_joints
-                
-                keypoint_sequence_for_video.append(keypoints_list_for_frame)
-            
-            print(f"  YOLO processed {frames_processed_yolo} frames for {video_name}. Extracted {len(keypoint_sequence_for_video)} keypoint sets.")
-
-            if len(keypoint_sequence_for_video) < self.data_params.min_frames_for_sample: # Add a min_frames check
-                 print(f"  Skipping {video_name}: not enough frames ({len(keypoint_sequence_for_video)} / {self.data_params.min_frames_for_sample})")
-                 continue
-
-            # Uniformly sample T frames
-            if len(keypoint_sequence_for_video) > self.T:
-                indices = np.linspace(0, len(keypoint_sequence_for_video) - 1, num=self.T, dtype=int)
-                sampled_keypoints = [keypoint_sequence_for_video[i] for i in indices]
-            elif len(keypoint_sequence_for_video) < self.T: # Padding if too short
-                sampled_keypoints = keypoint_sequence_for_video
-                padding_needed = self.T - len(sampled_keypoints)
-                pad_frame = [[0.0, 0.0, 0.0]] * self.num_joints # Pad with zero confidence keypoints
-                for _ in range(padding_needed):
-                    sampled_keypoints.append(pad_frame)
-            else: # Exactly T frames
-                sampled_keypoints = keypoint_sequence_for_video
-            
-            if len(sampled_keypoints) != self.T:
-                print(f"Error: Sampled keypoints for {video_name} have incorrect frame count: {len(sampled_keypoints)}. Expected: {self.T}")
-                continue
-
-            self.annotations.append({"data": sampled_keypoints, "action_id": action_id, "video_name": video_name})
-            print(f"  Added sample for {video_name} with {len(sampled_keypoints)} frames.")
-
-        if not self.annotations:
-            raise ValueError(f"No annotations were generated for datatype '{self.datatype}'. Check video paths and YOLO processing.")
-
-        with open(self.annotation_path, 'w') as f:
-            json.dump(self.annotations, f, indent=4)
-        print(f"Saved {len(self.annotations)} generated annotations to {self.annotation_path}")
-        
 class SiameseJointsDataset(Dataset):
     """
     Wrapper to produce pairs for joint CrossEntropy + Contrastive training.

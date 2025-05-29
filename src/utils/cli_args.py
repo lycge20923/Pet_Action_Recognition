@@ -44,8 +44,12 @@ class DataArguments:
         default="train_split",
         metadata={"help":"After 5-fold split"}
     )
+    fold_num: int = field(
+        default=5,
+        metadata={"help":"Conduct x-fold cross-validation"}
+    )
     fold_allow_diff: int = field(
-        default= 150, 
+        default= 200, 
         metadata={"help": "The maximum for the difference of the number of samples"}
     )
     metadata_name: str = field(
@@ -171,9 +175,13 @@ class ModelArguments:
         default=128, 
         metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
     )
-    add_velocity: bool = field(
-        default=False,
-        metadata={"help":"Add (x_diff, y_diff) in information of keypoints"}
+    # add_velocity: bool = field(
+    #     default=False,
+    #     metadata={"help":"Add (x_diff, y_diff) in information of keypoints"}
+    # )
+    add_optical_flow: bool = field(
+        default=True,
+        metadata={}
     )
     
 @dataclass

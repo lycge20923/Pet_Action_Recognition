@@ -93,13 +93,13 @@ def main():
         num_samples=args.num_samples,
         np_save_dir=np_save_dir
     )
-    
-    # # for temp test
-    # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'w') as f:
-    #     json.dump(all_samples, f)  
-    
+    # for temp test first
     # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'r') as f:
     #     all_samples = json.load(f)
+    
+    # # for temp test second
+    # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'w') as f:
+    #     json.dump(all_samples, f)  
      
     logger.info(f"Saved {len(all_samples)} window samples (.npz)")
 
@@ -110,7 +110,7 @@ def main():
         len({s['action_id'] for s in all_samples if s['source_video_id'] == src})
         for src in sources
     ]
-    sgkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+    sgkf = StratifiedGroupKFold(n_splits=args.fold_num, shuffle=True, random_state=42)
     source2fold = {}
     for fold, (_, val_idx) in enumerate(sgkf.split(sources, src_labels, groups=sources)):
         for idx in val_idx:
@@ -153,7 +153,7 @@ def main():
         round_k += 1
 
     # log per-fold class distribution
-    for fold in range(5):
+    for fold in range(args.fold_num):
         cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
         sorted_cnt = {action: cnt[action] for action in sorted(cnt)}
         logger.info(f"[Fold {fold}] samples per action: {sorted_cnt}")
