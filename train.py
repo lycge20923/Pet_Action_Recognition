@@ -12,7 +12,7 @@ import torch
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 
-from src.models.stgcn_model import ST_GCN, STGCN_MultiHead
+from src.models.model import ActionRecognitionModel
 from src.models.loss import ContrastiveLoss
 from src.dataset.dataset import JointsDataset, SiameseJointsDataset
 from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
@@ -133,11 +133,13 @@ def build_model_and_optimizer(model_params:ModelArguments,
         cross_entropy_loss = torch.nn.CrossEntropyLoss() 
     contrastive_loss = ContrastiveLoss()
     
-    # set model
-    if not train_params.add_contrastive_loss:
-        model = ST_GCN(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations).to(train_params.device)
-    else:
-        model = STGCN_MultiHead(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations, embed_dim=model_params.multihead_emb_dim).to(train_params.device)
+    # # set model
+    # if not train_params.add_contrastive_loss:
+    #     model = ST_GCN(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations).to(train_params.device)
+    # else:
+    #     model = STGCN_MultiHead(params=model_params, data_params=data_params, coords=coords, dilations=model_params.dilations, embed_dim=model_params.multihead_emb_dim).to(train_params.device)
+    model = ActionRecognitionModel(train_params, model_params, data_params, coords)
+    
     # set optimizer and scheduler
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=1e-6)

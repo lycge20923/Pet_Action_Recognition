@@ -93,11 +93,10 @@ def main():
         num_samples=args.num_samples,
         np_save_dir=np_save_dir
     )
-    # for temp test first
+    # for temp test
     # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'r') as f:
     #     all_samples = json.load(f)
     
-    # # for temp test second
     # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'w') as f:
     #     json.dump(all_samples, f)  
      

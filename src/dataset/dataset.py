@@ -20,6 +20,7 @@ class JointsDataset(Dataset):
         self.data_params = data_params
         self.aug_params = aug_params
         self.model_params = model_params
+        self.add_optical_flow = model_params.add_optical_flow
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -47,69 +48,77 @@ class JointsDataset(Dataset):
         # load keypoints from the .npz window file
         feat_path = self.annotations[index]["feature_file"]
         data = np.load(feat_path)
-        data_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
+        keypoints_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
+        # if self.add_optical_flow:
+        #     optical_flows_np = data["optical_flows"].astype(np.float32)
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)
 
         # Validate shape
         expected_shape = (self.T, self.num_joints, self.num_coords)
-        if data_np.shape != expected_shape:
+        if keypoints_np.shape != expected_shape:
             
             # This part is crucial and depends on how your data is structured if not uniform
-            print(f"Warning: Sample {index} has shape {data_np.shape}, expected {expected_shape}. Attempting to fix or skip.")
+            print(f"Warning: Sample {index} has shape {keypoints_np.shape}, expected {expected_shape}. Attempting to fix or skip.")
             # Example: if T is wrong, pad or truncate (simple padding with zeros)
-            if data_np.shape[0] < self.T:
-                padding = np.zeros((self.T - data_np.shape[0], self.num_joints, self.num_coords), dtype=np.float32)
-                data_np = np.concatenate((data_np, padding), axis=0)
-            elif data_np.shape[0] > self.T:
-                data_np = data_np[:self.T, :, :]
+            if keypoints_np.shape[0] < self.T:
+                padding = np.zeros((self.T - keypoints_np.shape[0], self.num_joints, self.num_coords), dtype=np.float32)
+                keypoints_np = np.concatenate((keypoints_np, padding), axis=0)
+            elif keypoints_np.shape[0] > self.T:
+                keypoints_np = keypoints_np[:self.T, :, :]
             
-            if data_np.shape[1] != self.num_joints or data_np.shape[2] != self.num_coords:
-                 raise ValueError(f"Corrected sample {index} shape {data_np.shape} still incorrect. Expected ({self.T}, {self.num_joints}, {self.num_coords}). Data: {data_np}")
+            if keypoints_np.shape[1] != self.num_joints or keypoints_np.shape[2] != self.num_coords:
+                 raise ValueError(f"Corrected sample {index} shape {keypoints_np.shape} still incorrect. Expected ({self.T}, {self.num_joints}, {self.num_coords}). Data: {keypoints_np}")
 
         # Data augmentation
         if self.aug_params.augment and self.datatype == "train": # Usually only augment training data
             # Geometric augmentations operate on a copy to modify x,y coordinates
             # They need access to confidence for proper center calculation and masking
             
-            current_data_np = data_np.copy()
+            current_keypoints_np = keypoints_np.copy()
 
             if random.random() < 0.5 and self.aug_params.rot_max > 0:
                 angle = random.uniform(-self.aug_params.rot_max, self.aug_params.rot_max)
-                current_data_np = self._rotate(current_data_np, angle)
+                current_keypoints_np = self._rotate(current_keypoints_np, angle)
 
             if random.random() < 0.5 and self.aug_params.scale_min < self.aug_params.scale_max:
                 scale = random.uniform(self.aug_params.scale_min, self.aug_params.scale_max)
-                current_data_np = self._scale(current_data_np, scale)
+                current_keypoints_np = self._scale(current_keypoints_np, scale)
 
             if random.random() < 0.5 and self.aug_params.trans_max > 0:
-                current_data_np = self._translate(current_data_np, trans_max=self.aug_params.trans_max)
+                current_keypoints_np = self._translate(current_keypoints_np, trans_max=self.aug_params.trans_max)
 
             if random.random() < 0.5 and self.aug_params.noise_std > 0:
-                current_data_np = self._add_noise(current_data_np, self.aug_params.noise_std)
+                current_keypoints_np = self._add_noise(current_keypoints_np, self.aug_params.noise_std)
 
             if random.random() < 0.3 and self.aug_params.shear_max > 0:
                 shear_factor = random.uniform(-self.aug_params.shear_max, self.aug_params.shear_max)
                 sx = shear_factor if random.random() < 0.5 else 0.0
                 sy = shear_factor if random.random() < 0.5 else 0.0
-                current_data_np = self._shear(current_data_np, sx, sy)
+                current_keypoints_np = self._shear(current_keypoints_np, sx, sy)
             
-            data_np = current_data_np # Assign back the geometrically augmented data
+            keypoints_np = current_keypoints_np # Assign back the geometrically augmented data
 
-            # Temporal and dropout augmentations operate on the (potentially geometrically augmented) data_np
+            # Temporal and dropout augmentations operate on the (potentially geometrically augmented) keypoints_np
             if self.aug_params.temporal_jitter_prob > 0:
-                data_np = self._temporal_jitter(data_np, self.aug_params.temporal_jitter_prob)
+                keypoints_np = self._temporal_jitter(keypoints_np, self.aug_params.temporal_jitter_prob)
 
             if self.aug_params.joint_drop_prob > 0:
-                data_np = self._joint_dropout(data_np, self.aug_params.joint_drop_prob)
+                keypoints_np = self._joint_dropout(keypoints_np, self.aug_params.joint_drop_prob)
 
             if self.aug_params.frame_drop_prob > 0:
-                data_np = self._frame_dropout(data_np, self.aug_params.frame_drop_prob)
+                keypoints_np = self._frame_dropout(keypoints_np, self.aug_params.frame_drop_prob)
 
-        data_tensor = torch.tensor(data_np, dtype=torch.float32)
+        keypoints_tensor = torch.tensor(keypoints_np, dtype=torch.float32)
         # Permute to (C, T, V) -> Channels (coords), Time (frames), Vertices (joints)
-        data_tensor = data_tensor.permute(2, 0, 1).contiguous()
-
-        return data_tensor, label
+        keypoints_tensor = keypoints_tensor.permute(2, 0, 1).contiguous()
+        
+        # print(keypoints_tensor.shape)
+        # print(optical_flows_np.shape)
+        
+        if self.add_optical_flow:
+            return keypoints_tensor, label
+        else:
+            return keypoints_tensor, label
 
     def _get_center(self, keypoints_with_conf: np.ndarray) -> np.ndarray:
         """
@@ -272,12 +281,12 @@ class JointsDataset(Dataset):
         output_data_slice[..., :2] = new_points_xy_flat.reshape(original_xy_shape)
         return output_data_slice
 
-    # Dropout and Temporal Jitter methods remain the same as they operate on data_np
+    # Dropout and Temporal Jitter methods remain the same as they operate on keypoints_np
     # and their logic for zeroing out or copying frames is independent of normalization scale,
     # assuming confidence=0 marks invalid/dropped keypoints.
 
-    def _joint_dropout(self, data_np_slice: np.ndarray, drop_prob: float) -> np.ndarray:
-        output_data = data_np_slice.copy()
+    def _joint_dropout(self, keypoints_np_slice: np.ndarray, drop_prob: float) -> np.ndarray:
+        output_data = keypoints_np_slice.copy()
         if random.random() < drop_prob:
             num_total_joints = output_data.shape[1] # self.num_joints
             # Drop a random fraction of joints up to drop_prob
@@ -287,8 +296,8 @@ class JointsDataset(Dataset):
                 output_data[:, drop_indices, :] = 0 # Set x, y, confidence to 0
         return output_data
 
-    def _frame_dropout(self, data_np_slice: np.ndarray, drop_prob: float) -> np.ndarray:
-        output_data = data_np_slice.copy()
+    def _frame_dropout(self, keypoints_np_slice: np.ndarray, drop_prob: float) -> np.ndarray:
+        output_data = keypoints_np_slice.copy()
         if random.random() < drop_prob:
             num_total_frames = output_data.shape[0] # self.T
             num_drop = int(num_total_frames * random.uniform(0.01, drop_prob))
@@ -297,8 +306,8 @@ class JointsDataset(Dataset):
                 output_data[drop_indices, :, :] = 0 # Set x, y, confidence to 0 for entire frames
         return output_data
 
-    def _temporal_jitter(self, data_np_slice: np.ndarray, jitter_prob: float) -> np.ndarray:
-        output_data = data_np_slice.copy()
+    def _temporal_jitter(self, keypoints_np_slice: np.ndarray, jitter_prob: float) -> np.ndarray:
+        output_data = keypoints_np_slice.copy()
         T = output_data.shape[0]
         if random.random() < jitter_prob:
             # Jitter a small percentage of frames

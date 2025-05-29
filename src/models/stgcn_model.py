@@ -203,7 +203,6 @@ class ST_GCN(nn.Module):
         params,
         data_params,
         coords: np.ndarray,
-        dilations: list
     ):
         super().__init__()
         # Build graph with spatial config partitioning
@@ -226,7 +225,7 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=params.t_kernel_size,
             A_size=A_size,
-            dilations=dilations
+            dilations=params.dilations
         )
         self.stgc2 = STGC_block(
             params.intermediate_channels,
@@ -234,7 +233,7 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=params.t_kernel_size,
             A_size=A_size,
-            dilations=dilations
+            dilations=params.dilations
         )
         self.stgc3 = STGC_block(
             params.intermediate_channels,
@@ -242,7 +241,7 @@ class ST_GCN(nn.Module):
             stride=2,
             t_kernel_size=params.t_kernel_size,
             A_size=A_size,
-            dilations=dilations
+            dilations=params.dilations
         )
         self.stgc4 = STGC_block(
             params.final_channels,
@@ -250,7 +249,7 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=params.t_kernel_size,
             A_size=A_size,
-            dilations=dilations
+            dilations=params.dilations
         )
         # Prediction head
         self.fc = nn.Conv2d(params.final_channels, params.num_classes, kernel_size=1)
@@ -283,7 +282,6 @@ class STGCN_MultiHead(nn.Module):
         params,
         data_params,
         coords: np.ndarray,
-        dilations: list,
         embed_dim: int = 128
     ):
         super().__init__()
@@ -292,7 +290,6 @@ class STGCN_MultiHead(nn.Module):
             params=params,
             data_params=data_params,
             coords=coords,
-            dilations=dilations
         )
         final_ch = params.final_channels
         num_classes = params.num_classes  
