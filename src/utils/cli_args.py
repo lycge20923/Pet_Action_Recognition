@@ -195,6 +195,14 @@ class ModelArguments:
         default="flow_imagenet.pt",
         metadata={"help":"I3D pretrained weights file name"}
     )
+    I3D_raw_feat_dim: int = field(
+        default=4096,
+        metadata={"help":"Raw feature dimension of I3D"}
+    )
+    I3D_project_dim: int = field(
+        default=128,
+        metadata={"help":"Project to have the similar size with ST-GCN"}
+    )
     stgcn_coords_file_name: str = field(
         default="coords.npy",
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
@@ -254,7 +262,7 @@ class TrainingArguments:
         metadata={"help": "Device to use for training (e.g., 'cuda', 'cpu')."}
     )
     epochs: int = field(
-        default=3000,
+        default=200,
         metadata={"help": "Total number of training epochs."}
     )
     batch_size: int = field(

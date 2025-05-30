@@ -145,7 +145,7 @@ def build_model_and_optimizer(model_params:ModelArguments,
     contrastive_loss = ContrastiveLoss()
     
     # set model
-    base_model = ActionRecognitionModel(train_params, model_params, data_params, coords)
+    base_model = ActionRecognitionModel(model_params, data_params, coords)
     if not train_params.add_contrastive_loss:
         model = base_model
     else:

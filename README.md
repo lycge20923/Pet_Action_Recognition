@@ -90,7 +90,7 @@ This project aims to recognize and classify various actions performed by pets (i
     1. Conduct the following commands
 
         ```
-        wandb sweep configs/sweep_config_original.yaml # this would include data augmentation and no data augmentation
+        wandb sweep configs/sweep_config.yaml # this would include data augmentation and no data augmentation
         ```
 
     2. Then it would show a command like ```wandb agent <path>```, copy and run it 
