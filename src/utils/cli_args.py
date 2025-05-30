@@ -195,7 +195,10 @@ class ModelArguments:
         default="flow_imagenet.pt",
         metadata={"help":"I3D pretrained weights file name"}
     )
-    
+    stgcn_coords_file_name: str = field(
+        default="coords.npy",
+        metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
+    )
     
 @dataclass
 class AugmentationArguments:

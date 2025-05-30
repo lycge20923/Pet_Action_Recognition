@@ -100,11 +100,16 @@ def prepare_dataloaders(data_params:DataArguments,
     if train_params.add_contrastive_loss:
         train_dataset = SiameseKpOfDataset(train_dataset, data_params)
     
-    sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
-    if isinstance(sample, torch.Tensor):
-        sample = sample.cpu().numpy()
-    sample.mean(axis=1)
-    coords = sample.mean(axis=1).T 
+    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_coords_file_name)
+    if not os.path.exists(coord_path):
+        sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
+        if isinstance(sample, torch.Tensor):
+            sample = sample.cpu().numpy()
+        sample.mean(axis=1)
+        coords = sample.mean(axis=1).T 
+        np.save(coord_path, coords)
+    else:
+        coords = np.load(coord_path)
     
     print("Start to add to Dataloader")
     # build dataloader
