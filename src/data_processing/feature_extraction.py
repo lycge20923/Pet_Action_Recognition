@@ -35,7 +35,8 @@ def normalize_keypoints(keypoints, bboxes, num_nodes):
 def crop_and_save_video(input_path: str,
                         bbox_annotation: list,
                         output_path: str,
-                        resize_scale: tuple):
+                        resize_scale: tuple,
+                        do_crop:bool=True):
     cap = cv2.VideoCapture(input_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -48,24 +49,35 @@ def crop_and_save_video(input_path: str,
         ret, frame = cap.read()
         if not ret:
             break
-
-        bbox = bbox_annotation[frame_idx]
-        if bbox is None or len(bbox) == 0:
-            bbox = prev_bbox
+        
+        # first: get crop info
+        # if we conduct cropping(do_crop==True), we need the cropping info. 
+        # o.w.(do_crop==False), the whole image would be the bbox 
+        if do_crop: 
+            bbox = bbox_annotation[frame_idx]
+            if bbox is None or len(bbox) == 0:
+                bbox = prev_bbox
+            else:
+                prev_bbox = bbox
         else:
-            prev_bbox = bbox
-
+            h, w = frame.shape[:2]
+            bbox = [0, 0, w, h]
+        
+        # second: crop 
         if not bbox:
-            crop_img = np.zeros((resize_scale[1], resize_scale[0], 3), dtype=np.uint8)
+            crop = np.zeros((resize_scale[1], resize_scale[0], 3), dtype=np.uint8)
         else:
             x1, y1, x2, y2 = map(int, bbox)
             h, w = frame.shape[:2]
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(w, x2), min(h, y2)
             crop = frame[y1:y2, x1:x2]
-
+        
+        ch, cw = crop.shape[:2]
+        if ch == 0 or cw == 0:
+            resized = np.zeros((resize_scale[1], resize_scale[0], 3), dtype=np.uint8)
+        else:
             # scaling and cropping
-            ch, cw = crop.shape[:2]
             scale = min(resize_scale[0] / cw, resize_scale[1] / ch)
             new_w, new_h = int(cw * scale), int(ch * scale)
             resized = cv2.resize(crop, (new_w, new_h))
@@ -77,14 +89,14 @@ def crop_and_save_video(input_path: str,
             left = pad_w // 2
             right = pad_w - left
 
-            crop_img = cv2.copyMakeBorder(
+            resized = cv2.copyMakeBorder(
                 resized,
                 top, bottom, left, right,
                 borderType=cv2.BORDER_CONSTANT,
                 value=[0, 0, 0]
             )
 
-        writer.write(crop_img)
+        writer.write(resized)
         frame_idx += 1
 
     cap.release()
@@ -185,7 +197,8 @@ def main():
                 input_path=input_path,
                 bbox_annotation=bbox_annotation,
                 output_path=tmp_file_path,
-                resize_scale=of_args.input_model_size
+                resize_scale=of_args.input_model_size,
+                do_crop=data_args.do_crop
             )
                         
             # --- optical flow ---

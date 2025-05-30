@@ -9,26 +9,8 @@ from vidgear.gears import VideoGear
 
 from ..utils.logging_utils import setup_logger
 from ..utils.cli_args import DataArguments
+from ..utils.common import get_video_info
 
-def get_video_info(video_path:str) -> cv2.VideoCapture:
-    '''
-    Purpose: Read a video file and return its properties.
-    Args:
-        video_path (str): Path to the input video file.
-    Returns:
-        dict: A dictionary containing the video's properties such as fps, width, and height.
-    '''
-    
-    # Open the video file
-    cap = cv2.VideoCapture(video_path)
-    
-    # Get video properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap.release()
-    
-    return {"fps": fps, "frame_width": frame_width, "frame_height":frame_height}
 
 def video_stabilization(video_path:str, crop_percentage:float) -> np.ndarray:
     '''
@@ -107,6 +89,7 @@ def main():
             writer = cv2.VideoWriter(output_path, fourcc, vid_info["fps"], (vid_info["frame_width"], vid_info["frame_height"]))
             for stabilized_img in stabilized_imgs_np:
                 writer.write(stabilized_img)
+            writer.release()
             logger.info(f"Input:'{os.path.basename(input_path):.4f}', Execution FPS: {exec_fps:.4f}")
             
         except Exception as e:

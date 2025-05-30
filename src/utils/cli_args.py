@@ -28,10 +28,12 @@ class DataArguments:
         default="stabilized",
         metadata={"help":"Stabilized dataset dir name"}
     )
+    # for ablation study
     skip_stabilization: bool = field(
         default= False,
         metadata={"help":"Whether it would skip the step for video stabilization"}
     )
+    # for ablation study
     stabilized_crop_percentage: float = field(
         default= 0.9,
         metadata={"help":"The cropping ratio for video stabilization"}
@@ -39,6 +41,11 @@ class DataArguments:
     feature_extract_dir_name: str = field(
         default="feature_extracted",
         metadata={"help": "Pose_estimation dataset dir name"}
+    )
+    # for ablation study
+    do_crop: bool = field(
+        default=True,
+        metadata={"help":"Doing crop before feed the segments for optical flow extraction"}
     )
     trainsplit_dir_name: str = field(
         default="train_split",
@@ -76,6 +83,7 @@ class DataArguments:
         default=64, 
         metadata={"help":"Frame number for splitting"}
     )
+    # for ablation study
     num_samples: int = field(
         default=32,
         metadata={"help":"Sampling number for inputing to model"}
@@ -152,7 +160,7 @@ class ModelArguments:
         metadata={"help":"Intermediate channel size in st-gcn"}
     )
     final_channels: int = field(
-        default=64,
+        default=128,
         metadata={"help":"Final channel size in st-gcn"}
     )
     t_kernel_size: int =field(
@@ -301,8 +309,9 @@ class TrainingArguments:
         default= 1000, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
+    # for ablation study
     add_contrastive_loss: bool = field(
-        default=False,
+        default=True,
         metadata={"help":"Add contrastive loss"}
     )
     contrastive_loss_coefficient: float = field(

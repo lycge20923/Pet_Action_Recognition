@@ -64,13 +64,11 @@ class ContrastiveActionWrapper(nn.Module):
         self.backbone = backbone
         backbone_output_feat_dim = self.backbone.total_feature_dimension
         self.proj_head = nn.Linear(backbone_output_feat_dim, emb_dim)
-        self.class_head = nn.Linear(backbone_output_feat_dim, num_classes_wrapper_head)
         
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
-        feat_from_backbone, _ = self.backbone(skeleton, flow=flow)
+        feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
-        wrapper_logits = self.class_head(feat_from_backbone)
-        return emb, wrapper_logits
+        return emb, main_logits
 
 if __name__ == "__main__":
     import numpy as np 

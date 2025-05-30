@@ -66,7 +66,7 @@ This project aims to recognize and classify various actions performed by pets (i
 
 ### Obtain Information/Feature(keypoints and optical flows)
 
-* In this step, we would refer 
+* In this step, we would refer the following two repositories to extract keypoints and optical flows of the segmented videos:
 
     1. [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose): extract skeleton information. 
 
@@ -97,3 +97,8 @@ This project aims to recognize and classify various actions performed by pets (i
 
 ## Prediction
 
+* You could use the following command to make predictions on a video, it would output the intermediate results(including optical flows and keypoints) and the final results:
+
+    ```
+    python predict.py --input_path <input video path> --checkpoint_path <checkpoint path>
+    ```

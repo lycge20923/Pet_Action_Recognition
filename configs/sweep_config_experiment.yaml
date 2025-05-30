@@ -1,0 +1,55 @@
+program: train.py
+method: grid
+metric:
+  name: best_val_acc
+  goal: maximize
+parameters:
+  #  for not adding optical flow
+  batch_size:
+    values: [128]
+  epochs:
+    values: [3000]
+  add_optical_flow:
+    values: [False]
+
+  # --- Parameters to vary in Stage 1 ---
+  learning_rate:
+    values: [1e-4, 3e-3, 3e-5]
+  add_contrastive_loss:
+    values: [True, False]           
+  intermidiate_channels:
+    values: [32]               
+  t_kernel_size:
+    values: [9]              
+
+  # --- Parameters fixed for Stage 1 (add them here with single values) ---
+  final_channels:
+    values: [128]
+  opt_weight_decay:
+    values: [1e-5]
+  contrastive_loss_coefficient:
+    values: [0.4] # Will only be used if add_contrastive_loss is True
+  augment:
+    values: [True]
+  
+  # The following augmentation parameters are effectively OFF 
+  # if your train.py script checks the `augment: False` flag.
+  # If you still need to pass them to your script, fix them to default values.
+  rot_max:
+    values: [33.340999] # Example default, or whatever your script expects
+  scale_min: 
+    values: [0.825436]
+  scale_max:
+    values: [1.110723]
+  joint_drop_prob:
+    values: [0.20039]
+  frame_drop_prob:
+    values: [0.026499]
+  shear_max:
+    values: [0.083993038]
+  temporal_jitter_prob:
+    values: [0.12385439]
+  dilations:
+    values:
+      - [1]
+      - [2]
