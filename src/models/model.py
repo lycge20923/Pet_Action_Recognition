@@ -13,16 +13,22 @@ class ActionRecognitionModel(nn.Module):
                  data_params:DataArguments,
                  coords):
         super().__init__()
+        self.only_optical_flow = model_params.only_optical_flow
         self.use_optical_flow = model_params.add_optical_flow
         
         # initiate model
-        self.skel_model = ST_GCN(params=model_params, data_params=data_params, coords=coords)
-        self.I3D = None
-        
+        if not self.only_optical_flow: # at least we use skeleton information 
+            self.skel_model = ST_GCN(params=model_params, data_params=data_params, coords=coords)
+            self._skel_feat_dim = self.skel_model.fc.in_channels
+        else: # skip skeleton information
+            self.skel_model = None
+            self._skel_feat_dim = 0
         # feat
-        self._skel_feat_dim = self.skel_model.fc.in_channels
+        self.I3D = None
         self._flow_feat_dim = 0
-        if self.use_optical_flow:
+        self._projected_flow_feat_dim = 0
+        
+        if self.use_optical_flow or self.only_optical_flow:
             self.I3D = InceptionI3d(in_channels=2)
             
             # load weight 
@@ -36,20 +42,29 @@ class ActionRecognitionModel(nn.Module):
         
         # concate feature's size, for final classifier
         self.total_feature_dimension = self._skel_feat_dim
-        if self.use_optical_flow and self.I3D is not None:
+        if (self.use_optical_flow or self.only_optical_flow) and self.I3D is not None:
             self.total_feature_dimension += self._projected_flow_feat_dim
         self.final_classifier = nn.Linear(self.total_feature_dimension, model_params.num_classes)
     
         
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
+        # 1. only optical flow
+        if self.only_optical_flow:
+            flow_map = self.I3D.extract_features(flow)
+            flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
+            projected_flow_feat = self.flow_feature_projector(flow_feat)
+            combined_feat = projected_flow_feat
+            main_task_logits = self.final_classifier(combined_feat)
+            return combined_feat, main_task_logits
+        
+        # 2. at least use skeleton information
         skel_feat, _ = self.skel_model(skeleton)
         combined_feat = skel_feat
-        if self.I3D is not None and self.use_optical_flow:
-            if flow is not None:
-                flow_map = self.I3D.extract_features(flow)
-                flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
-                projected_flow_feat = self.flow_feature_projector(flow_feat)
-                combined_feat = torch.cat([skel_feat, projected_flow_feat], dim=1)
+        if self.use_optical_flow and self.I3D is not None and flow is not None:
+            flow_map = self.I3D.extract_features(flow)
+            flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
+            projected_flow_feat = self.flow_feature_projector(flow_feat)
+            combined_feat = torch.cat([skel_feat, projected_flow_feat], dim=1)
 
         main_task_logits = self.final_classifier(combined_feat)
         return combined_feat, main_task_logits

@@ -76,21 +76,21 @@ def custom_collate(batch):
                   isinstance(first_item[2], tuple) and len(first_item[2]) == 2)   # (lab1,lab2)
     # SiameseKpOfDataset
     if is_siamese:
-        kp1_list = [item[0][0] for item in batch]
+        kp1_list = [item[0][0] for item in batch] # might have None
         kp2_list = [item[0][1] for item in batch]
-        flow1_list = [item[1][0] for item in batch]
+        flow1_list = [item[1][0] for item in batch] # might have None
         flow2_list = [item[1][1] for item in batch]
         lab1_list = [item[2][0] for item in batch]
         lab2_list = [item[2][1] for item in batch]
         y_list = [item[3] for item in batch]
 
-        collated_kp1 = default_collate(kp1_list)
-        collated_kp2 = default_collate(kp2_list)
         collated_lab1 = default_collate(lab1_list)
         collated_lab2 = default_collate(lab2_list)
         collated_y = default_collate(y_list)
 
         # special case for optical flow
+        collated_kp1 = default_collate(kp1_list) if (kp1_list and kp1_list[0] is not None) else None
+        collated_kp2 = default_collate(kp2_list) if (kp2_list and kp2_list[0] is not None) else None
         collated_flow1 = default_collate(flow1_list) if (flow1_list and flow1_list[0] is not None) else None
         collated_flow2 = default_collate(flow2_list) if (flow2_list and flow2_list[0] is not None) else None
         
@@ -104,10 +104,10 @@ def custom_collate(batch):
         flow_list = [item[1] for item in batch] 
         lab_list = [item[2] for item in batch]
         
-        collated_kp = default_collate(kp_list)
         collated_lab = default_collate(lab_list)
         
         # special case for optical flow
+        collated_kp = default_collate(kp_list) if (kp_list and kp_list[0] is not None) else None
         collated_flow = default_collate(flow_list) if (flow_list and flow_list[0] is not None) else None
         return collated_kp, collated_flow, collated_lab
     
@@ -238,7 +238,7 @@ def train_one_epoch(model,
         
         if train_params.add_contrastive_loss and contrastive_loss: 
             (kp1, kp2), (flow1, flow2), (lab1, lab2), y = batch_data
-            kp1, kp2 = kp1.to(device), kp2.to(device)
+            kp1, kp2 = kp1.to(device) if kp1 is not None else None, kp2.to(device) if kp2 is not None else None
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
             y = y.to(device)
@@ -267,7 +267,7 @@ def train_one_epoch(model,
             correct += (pred2 == lab2).sum().item()
         else: 
             kps, flow, label = batch_data
-            kps, flow = kps.to(device), flow.to(device) if flow is not None else None
+            kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
             _, output = model(kps, flow)
@@ -307,7 +307,7 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
     with torch.no_grad():
         for kps, flow, label in loader:
             
-            kps, flow = kps.to(device), flow.to(device) if flow is not None else None
+            kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
             if train_params.add_contrastive_loss:

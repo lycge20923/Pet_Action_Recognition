@@ -211,6 +211,10 @@ class ModelArguments:
         default=128,
         metadata={"help":"Project to have the similar size with ST-GCN"}
     )
+    only_optical_flow: bool = field(
+        default=False, 
+        metadata={"help":"Only use optical flow and I3D to conduct action recognition"}
+    )
     stgcn_coords_file_name: str = field(
         default="coords.npy",
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}

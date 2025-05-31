@@ -21,6 +21,7 @@ class KpOfDataset(Dataset):
         self.aug_params = aug_params
         self.model_params = model_params
         self.add_optical_flow = model_params.add_optical_flow
+        self.only_optical_flow = model_params.only_optical_flow
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -52,14 +53,18 @@ class KpOfDataset(Dataset):
         # --- load feature and label --- 
         # label
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)
-
-        # optical flows
+        
         optical_flows_tensor = None
-        if self.add_optical_flow:
+        keypoints_tensor = None 
+        
+        # optical flows
+        if self.only_optical_flow or self.add_optical_flow:
             optical_flows_np = data["optical_flows"].astype(np.float32)
             optical_flows_np = optical_flows_np.squeeze(axis=1)
             optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3)
             optical_flows_tensor = torch.from_numpy(optical_flows_np).float()
+        if self.only_optical_flow:
+            return keypoints_tensor, optical_flows_tensor, label
         
         # keypoints
         keypoints_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
