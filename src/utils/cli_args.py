@@ -1,3 +1,8 @@
+'''
+This may be a bit messy, but please ensure that any parameter names are unique, 
+even if they belong to different classes.
+'''
+
 from dataclasses import dataclass, field
 from typing import Literal, List
 import torch
@@ -51,7 +56,7 @@ class DataArguments:
         default="train_split",
         metadata={"help":"After 5-fold split"}
     )
-    fold_num: int = field(
+    num_folds: int = field(
         default=5,
         metadata={"help":"Conduct x-fold cross-validation"}
     )
@@ -223,15 +228,15 @@ class ModelArguments:
 @dataclass
 class AugmentationArguments:
     augment: bool = field(
-        default=False,
+        default=True,
         metadata={"help": "Whether to apply data augmentation."}
     )
     rot_max: float = field(
-        default=20.0,
+        default=33.0,
         metadata={"help": "Maximum rotation angle for augmentation (in degrees)."}
     )
     scale_min: float = field(
-        default=0.9,
+        default=0.8,
         metadata={"help": "Minimum scaling factor for augmentation."}
     )
     scale_max: float = field(
@@ -247,19 +252,19 @@ class AugmentationArguments:
         metadata={"help": "Standard deviation of Gaussian noise to add to keypoints."}
     )
     joint_drop_prob: float = field(
-        default=0.1,
+        default=0.2,
         metadata={"help": "Probability of dropping individual joints."}
     )
     frame_drop_prob: float = field(
-        default=0.1,
+        default=0.02,
         metadata={"help": "Probability of dropping keypoints from an entire frame."}
     )
     shear_max: float = field(
-        default=0.1,
+        default=0.08,
         metadata={"help": "Maximum shear intensity or angle for augmentation."}
     )
     temporal_jitter_prob: float = field(
-        default=0.1,
+        default=0.12,
         metadata={"help": "Probability of applying temporal jittering."}
     )
     valid_kpt_confidence_thresh: float = field(
@@ -273,8 +278,12 @@ class TrainingArguments:
         default="cuda" if torch.cuda.is_available() else "cpu",
         metadata={"help": "Device to use for training (e.g., 'cuda', 'cpu')."}
     )
+    fold_num: int = field(
+        default=0,
+        metadata={"help": "Fold number for k-fold cross-validation in the training step."}
+    )
     epochs: int = field(
-        default=200,
+        default=100,
         metadata={"help": "Total number of training epochs."}
     )
     batch_size: int = field(
@@ -282,7 +291,7 @@ class TrainingArguments:
         metadata={"help": "Batch size for training and evaluation."}
     )
     learning_rate: float = field(
-        default=0.0003,
+        default=1e-4,
         metadata={"help": "Initial learning rate for the optimizer."}
     )
     train_ratio: float = field(
@@ -298,7 +307,7 @@ class TrainingArguments:
         metadata={"help": "Number of worker processes for data loading."}
     )
     opt_weight_decay: float = field(
-        default=1e-4,
+        default=1e-5,
         metadata={"help": "Weight decay (L2 penalty) for the optimizer."}
     )
     momentum: float = field(
@@ -319,6 +328,6 @@ class TrainingArguments:
         metadata={"help":"Add contrastive loss"}
     )
     contrastive_loss_coefficient: float = field(
-        default=0.5,
+        default=0.4,
         metadata={"help":"The coefficient for adding contrastive loss"}
     )

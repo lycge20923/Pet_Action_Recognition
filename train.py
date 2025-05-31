@@ -20,36 +20,25 @@ from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments,
 
 def setup_experiments():
     # set wandb
-    run = wandb.init(project="st_gcn_adjust")
+    
+    def load_from_wandb(cls, config):
+        wandb_dict = dict(config)
+        field_names = {f.name for f in dataclasses.fields(cls)}
+        filtered = {k: v for k, v in wandb_dict.items() if k in field_names}
+        return cls(**filtered)
+    
+    run = wandb.init(project="Pet_Action_Recognition")
+    config = wandb.config
+    # change name 
+    if config.exec_name and config.fold_num:
+        wandb.run.name = f"{config.exec_name}_{str(config.fold_num)}"
     
     # load parameters and add to wandb
+    model_params = load_from_wandb(ModelArguments, config)
+    train_params = load_from_wandb(TrainingArguments, config)
+    aug_params_train = load_from_wandb(AugmentationArguments, config)
+    aug_params_eval = AugmentationArguments(augment=False)
     data_params = DataArguments()
-    model_params = ModelArguments(
-        intermediate_channels=wandb.config.intermidiate_channels,
-        final_channels=wandb.config.final_channels,
-        t_kernel_size=wandb.config.t_kernel_size,
-        dilations=wandb.config.dilations,
-        add_optical_flow=wandb.config.add_optical_flow
-    )
-    train_params = TrainingArguments(
-        add_contrastive_loss=wandb.config.add_contrastive_loss,
-        contrastive_loss_coefficient=wandb.config.contrastive_loss_coefficient,
-        learning_rate=wandb.config.learning_rate,
-        opt_weight_decay=wandb.config.opt_weight_decay,
-        epochs=wandb.config.epochs,
-        batch_size=wandb.config.batch_size
-    )
-    aug_params_train = AugmentationArguments(
-        augment=wandb.config.augment, 
-        rot_max=wandb.config.rot_max,
-        scale_min=wandb.config.scale_min,
-        scale_max=wandb.config.scale_max,
-        joint_drop_prob=wandb.config.joint_drop_prob,
-        frame_drop_prob=wandb.config.frame_drop_prob
-    )
-    aug_params_eval = AugmentationArguments(
-        augment=False
-    )
     
     # saving dir
     now = datetime.now()
@@ -117,8 +106,8 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
     
-    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False)
-    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True)
+    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False, fold_num=train_params.fold_num)
+    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True, fold_num=train_params.fold_num)
     
     # calculate the dataset size
     train_size = len(train_dataset)

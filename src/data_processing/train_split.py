@@ -109,7 +109,7 @@ def main():
         len({s['action_id'] for s in all_samples if s['source_video_id'] == src})
         for src in sources
     ]
-    sgkf = StratifiedGroupKFold(n_splits=args.fold_num, shuffle=True, random_state=42)
+    sgkf = StratifiedGroupKFold(n_splits=args.num_folds, shuffle=True, random_state=42)
     source2fold = {}
     for fold, (_, val_idx) in enumerate(sgkf.split(sources, src_labels, groups=sources)):
         for idx in val_idx:
@@ -152,7 +152,7 @@ def main():
         round_k += 1
 
     # log per-fold class distribution
-    for fold in range(args.fold_num):
+    for fold in range(args.num_folds):
         cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
         sorted_cnt = {action: cnt[action] for action in sorted(cnt)}
         logger.info(f"[Fold {fold}] samples per action: {sorted_cnt}")
