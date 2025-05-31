@@ -7,6 +7,7 @@ import os
 import random
 import wandb
 from tqdm import tqdm
+from sklearn.metrics import precision_recall_fscore_support
 
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
@@ -30,8 +31,10 @@ def setup_experiments():
     run = wandb.init(project="Pet_Action_Recognition")
     config = wandb.config
     # change name 
-    if config.exec_name and config.fold_num:
-        wandb.run.name = f"{config.exec_name}_{str(config.fold_num)}"
+    exec_name = config.get("exec_name")
+    fold_num = config.get("fold_num")
+    if exec_name and fold_num:
+        wandb.run.name = f"{exec_name}_{str(fold_num)}"
     
     # load parameters and add to wandb
     model_params = load_from_wandb(ModelArguments, config)
@@ -293,6 +296,10 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
     class_correct = torch.zeros(num_classes).to(device)
     class_total = torch.zeros(num_classes).to(device)
     
+    # for precision, recall, f1
+    all_trues = []
+    all_preds = []
+    
     with torch.no_grad():
         for kps, flow, label in loader:
             
@@ -310,9 +317,11 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
             _, predict = torch.max(output.data, 1)
             test_correct += (predict == label).sum().item()
             
+            # add batch label & predict to list
+            all_trues.extend(label.cpu().numpy())
+            all_preds.extend(predict.cpu().numpy())
             
             # calculate class-wise accuracy
-            current_batch_size = label.size(0)
             corrects = (predict == label)
             for i in range(current_batch_size):
                 true_label = label[i].item()       
@@ -322,16 +331,44 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
 
     epoch_acc = test_correct / len(loader.dataset)
     epoch_loss = test_loss / len(loader.dataset)
-    
     per_class_acc = class_correct / class_total.clamp(min=1)
-    log_dict = {"epoch":epoch, "val_loss": epoch_loss, "val_acc":epoch_acc}
+    
+    # for precision, recall, f1
+    per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
+        all_trues,
+        all_preds,
+        labels=list(range(num_classes)),
+        zero_division=0
+    )
+    overall_prec, overall_rec, overall_f1, _ = precision_recall_fscore_support(
+        all_trues,
+        all_preds,
+        average='macro',
+        zero_division=0
+    )
+    
+    log_dict = {"epoch":epoch, "val_loss": epoch_loss, "val_acc":epoch_acc, "val_prec":float(overall_prec), "val_rec":float(overall_rec), "val_f1":float(overall_f1)}
     for i in range(num_classes):
-        log_dict[f"val_acc_class_{actions[i]}"] = per_class_acc[i].item()
-        log_dict[f"val_samples_class_{actions[i]}"] = class_total[i].item()
+        action_name = actions[i]
+        log_dict[f"val_acc_class_{action_name}"] = per_class_acc[i].item()
+        log_dict[f"val_precision_class_{action_name}"] = float(per_class_prec[i])
+        log_dict[f"val_recall_class_{action_name}"] = float(per_class_rec[i])
+        log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
+        # log_dict[f"val_samples_class_{actions[i]}"] = class_total[i].item()
     wandb.log(log_dict)
     print("Per-class Validation Accuracy:")
+    print(f"  Overall   Loss: {epoch_loss:.4f}, Acc: {epoch_acc:.4f}, "
+          f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
+    print("  Per-class:")
     for i in range(num_classes):
-        print(f"  Class {actions[i]}: {per_class_acc[i].item():.4f} ({int(class_correct[i].item())}/{int(class_total[i].item())})")
+        action_name = actions[i]
+        acc_i = per_class_acc[i].item()
+        prec_i = per_class_prec[i]
+        rec_i = per_class_rec[i]
+        f1_i = per_class_f1[i]
+        cor_i = class_correct[i].item()
+        tot_i = class_total[i].item()
+        print(f"Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
     
     return epoch_loss, epoch_acc
 

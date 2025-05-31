@@ -1,0 +1,21 @@
+program: train.py
+method: grid
+metric:
+  name: best_val_acc
+  goal: maximize
+parameters:
+  exec_name: # change to easily identify
+    values: ["stgcn"]
+  fold_num:
+    values: [0]
+  # ... other parameters
+  epochs:
+    values: [2000]
+  batch_size:
+    values: [128]
+  dilations:
+    values: [[2], [3]]
+  add_optical_flow:
+    values: [False]
+  only_optical_flow:
+    values: [False]
