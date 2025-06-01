@@ -367,10 +367,9 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
         log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
         # log_dict[f"val_samples_class_{actions[i]}"] = class_total[i].item()
     wandb.log(log_dict)
-    print("Per-class Validation Accuracy:")
-    print(f"  Overall   Loss: {epoch_loss:.4f}, Acc: {epoch_acc:.4f}, "
+    print(f"Overall   Loss: {epoch_loss:.4f}, Acc: {epoch_acc:.4f}, "
           f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
-    print("  Per-class:")
+    print("Per-class:")
     for i in range(num_classes):
         action_name = actions[i]
         acc_i = per_class_acc[i].item()
@@ -379,7 +378,7 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
         f1_i = per_class_f1[i]
         cor_i = class_correct[i].item()
         tot_i = class_total[i].item()
-        print(f"Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
+        print(f"  Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
     
     return epoch_loss, epoch_acc
 

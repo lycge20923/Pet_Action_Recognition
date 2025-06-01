@@ -21,7 +21,7 @@ from src.utils.cli_args import DataArguments, ModelArguments, OutputArguments, P
 from src.utils.common import get_video_info, load_from_wandb
 from src.data_processing.stabilization import video_stabilization
 from src.data_processing.feature_extraction import normalize_keypoints, crop_and_save_video
-from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
+from src.models.model import ActionRecognitionModel
 
 from features.pose_estimation import PoseEstimationModel
 from features.optical_flow import OpticalFlowModel
