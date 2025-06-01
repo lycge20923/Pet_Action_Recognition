@@ -14,10 +14,11 @@ import os
 import torch
 import torch.nn.functional as F
 import json
+import yaml
 
 from src.utils.logging_utils import setup_logger
-from src.utils.cli_args import DataArguments, ModelArguments, OutputArguments, PoseEstimationArguments, OpticalFlowArguments
-from src.utils.common import get_video_info
+from src.utils.cli_args import DataArguments, ModelArguments, OutputArguments, PoseEstimationArguments, OpticalFlowArguments, TrainingArguments
+from src.utils.common import get_video_info, load_from_wandb
 from src.data_processing.stabilization import video_stabilization
 from src.data_processing.feature_extraction import normalize_keypoints, crop_and_save_video
 from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
@@ -28,17 +29,31 @@ from features.optical_flow import OpticalFlowModel
 def _parse_args():
     parser = argparse.ArgumentParser(description='Prediction for Action Recognition')
     parser.add_argument('--input_path', required=True, help="The video path")
-    parser.add_argument('--checkpoint_path', required=True, help="The path storing the pretrained weight")
+    parser.add_argument('--checkpoint_dir', required=True, help="The directory storing the pretrained weight")
+    parser.add_argument('--checkpoint_name', default="best.pth", help="The .pth name")
     return parser.parse_args()
 
 def main():
     
-    # --- get args ---
-    args = _parse_args()
-    data_params, model_params, output_params = DataArguments(), ModelArguments(), OutputArguments()
-    
     # --- set logger ---
     logger = setup_logger(file_path=__file__,level=logging.INFO)
+    
+    # --- get args ---
+    args = _parse_args()
+    save_adjusted_args_name = TrainingArguments().save_adjusted_args_name
+    adjusted_params_path = os.path.join(args.checkpoint_dir, save_adjusted_args_name)
+    if os.path.exists(adjusted_params_path):
+        with open(adjusted_params_path, 'r') as f:
+            adjusted_params = yaml.safe_load(f)
+    
+        data_params = DataArguments()
+        model_params = load_from_wandb(ModelArguments, adjusted_params)
+        output_params = OutputArguments()
+    else:
+        logger.warning("There is no 'args_adjusted.yaml' in the checkpoint dircetory.") 
+        logger.warning("You have to adjust predict.py to manually pass in the correct parameters.")
+    
+    checkpoint_path = os.path.join(args.checkpoint_dir, args.checkpoint_name)
     
     # --- set output folder ---
     timestampe = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -141,10 +156,10 @@ def main():
     coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_coords_file_name)
     coords = np.load(coord_path)
     model = ActionRecognitionModel(model_params, data_params, coords).to(device)
-    ckpt = torch.load(args.checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
-    logger.info(f"Loaded checkpoint {args.checkpoint_path}")
+    logger.info(f"Loaded checkpoint {checkpoint_path}")
     window_results = []
     actions = data_params.actions
     with torch.no_grad():

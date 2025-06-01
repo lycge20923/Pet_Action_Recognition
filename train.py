@@ -6,7 +6,7 @@ import numpy as np
 import os
 import random
 import wandb
-from tqdm import tqdm
+import yaml
 from sklearn.metrics import precision_recall_fscore_support
 
 import torch
@@ -18,18 +18,13 @@ from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
 from src.dataset.dataset import KpOfDataset, SiameseKpOfDataset
 from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
+from src.utils.common import load_from_wandb
 
 def setup_experiments():
     # set wandb
-    
-    def load_from_wandb(cls, config):
-        wandb_dict = dict(config)
-        field_names = {f.name for f in dataclasses.fields(cls)}
-        filtered = {k: v for k, v in wandb_dict.items() if k in field_names}
-        return cls(**filtered)
-    
     run = wandb.init(project="Pet_Action_Recognition")
-    config = wandb.config
+    config = dict(wandb.config)
+    
     # change name 
     exec_name = config.get("exec_name")
     fold_num = config.get("fold_num")
@@ -49,6 +44,23 @@ def setup_experiments():
     saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_dir_name, timestamp)
     os.makedirs(saving_dir, exist_ok=True)
     
+    # save parameters
+    complete_config_to_save = {
+        "dataset_params": dataclasses.asdict(data_params),
+        "augmentation_params_train": dataclasses.asdict(aug_params_train),
+        "model_params": dataclasses.asdict(model_params),
+        "training_params": dataclasses.asdict(train_params),
+        "training_completed_at": timestamp 
+    }
+    
+    try:
+        with open(os.path.join(saving_dir, train_params.save_complete_args_name), 'w', encoding='utf-8') as f:
+            json.dump(complete_config_to_save, f, indent=4, ensure_ascii=False)
+        with open(os.path.join(saving_dir, train_params.save_adjusted_args_name), 'w', encoding='utf-8') as f:
+            yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True)
+    except Exception as e:
+        print(f"{e}")
+    
     return {"run": run, 
             "parameters":
                 {"data": data_params, 
@@ -56,8 +68,7 @@ def setup_experiments():
                  "train":train_params, 
                  "aug_train": aug_params_train,
                  "aug_val": aug_params_eval},
-            "saving_dir":saving_dir,
-            "timestamp":timestamp
+            "saving_dir":saving_dir
             }
 
 def custom_collate(batch):
@@ -380,7 +391,6 @@ def main():
     data_params, model_params, train_params, aug_params_train, aug_params_eval = \
         params["data"], params["model"], params["train"], params["aug_train"], params["aug_val"]
     saving_dir = settings["saving_dir"]
-    timestamp = settings["timestamp"]
     
     # set seed
     set_seed(train_params.seed)
@@ -450,21 +460,6 @@ def main():
         
     print(f"Best Validation Accuracy: {best_val_acc:.4f}")
     wandb.log({"best_val_acc": best_val_acc})
-    
-    # save parameters and plot
-    config_to_save = {
-        "dataset_params": dataclasses.asdict(data_params),
-        "augmentation_params_train": dataclasses.asdict(aug_params_train),
-        "model_params": dataclasses.asdict(model_params),
-        "training_params": dataclasses.asdict(train_params),
-        "training_completed_at": timestamp 
-    }
-    pars_filename = "args.json"
-    try:
-        with open(os.path.join(saving_dir, pars_filename), 'w', encoding='utf-8') as f:
-            json.dump(config_to_save, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        print(f"{e}")
     
     run.finish()
 

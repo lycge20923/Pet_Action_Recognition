@@ -331,3 +331,11 @@ class TrainingArguments:
         default=0.4,
         metadata={"help":"The coefficient for adding contrastive loss"}
     )
+    save_complete_args_name: str = field(
+        default="args_complete.json",
+        metadata={"help":"The file name for saving complete args"}
+    )
+    save_adjusted_args_name: str = field(
+        default="args_adjusted.yaml",
+        metadata={"help":"The file name for saving adjusted args, those would be used in prediction"}
+    )

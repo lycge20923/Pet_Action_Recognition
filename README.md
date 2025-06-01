@@ -87,18 +87,33 @@ This project aims to recognize and classify various actions performed by pets (i
 ### Training
 * Finally, we could start to train. To utilize ```wandb``` to help us to find the best parameters, please follow the below steps: 
 
-    1. Conduct the following commands
+    1. Go check ```src/utils/cli_args.py``` to see the default values. If you want to change the values, it is recommended not to directly modify the values in it. Instead, you should write a config file like any files in ```configs```, and specify which parameters you want to change. For example, to disable ```add_optical_flow```, you could write:
+
+        ```
+        ...
+        parameters:
+          add_optical_flow: # this is the parameters you want to change
+            values: [False] # or you could specifiy multiple values like [True, False]
+        ```
+
+    2. Conduct the following commands
 
         ```
         wandb sweep configs/sweep_config.yaml # this would include data augmentation and no data augmentation
         ```
 
-    2. Then it would show a command like ```wandb agent <path>```, copy and run it 
+    3. Then it would show a command like ```wandb agent <path>```, copy and run it 
+
+    4. After finishing training(or you terminated on the way), you could go to check ```run``` directory and find the info of arguments(```.json```, ```.yaml```) and checkpoint (```.pth```) in it 
 
 ## Prediction
 
 * You could use the following command to make predictions on a video, it would output the intermediate results(including optical flows and keypoints) and the final results:
 
     ```
-    python predict.py --input_path <input video path> --checkpoint_path <checkpoint path>
+    python predict.py --input_path <input video path> --checkpoint_dir <checkpoint dir>
     ```
+
+* Important Notes
+
+    * When finishing the prediction, you could find the results in the ```output``` directory
