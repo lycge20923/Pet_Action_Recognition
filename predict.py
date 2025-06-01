@@ -42,16 +42,18 @@ def main():
     args = _parse_args()
     save_adjusted_args_name = TrainingArguments().save_adjusted_args_name
     adjusted_params_path = os.path.join(args.checkpoint_dir, save_adjusted_args_name)
+    
+    # load adjusted parameters if exists
     if os.path.exists(adjusted_params_path):
         with open(adjusted_params_path, 'r') as f:
             adjusted_params = yaml.safe_load(f)
-    
-        data_params = DataArguments()
         model_params = load_from_wandb(ModelArguments, adjusted_params)
-        output_params = OutputArguments()
     else:
+        model_params = ModelArguments() # adjust if needed
         logger.warning("There is no 'args_adjusted.yaml' in the checkpoint dircetory.") 
         logger.warning("You have to adjust predict.py to manually pass in the correct parameters.")
+    data_params = DataArguments()
+    output_params = OutputArguments()
     
     checkpoint_path = os.path.join(args.checkpoint_dir, args.checkpoint_name)
     
@@ -89,11 +91,11 @@ def main():
     # --- feature extraction ---
     # initialize model
     pe_model = PoseEstimationModel(**asdict(PoseEstimationArguments()))
-    output_plot_path = os.path.join(output_dir, f"{base}_plot.{extension}")
+    output_pe_path = os.path.join(output_dir, f"{base}_pose_estimation.{extension}")
     
     # extract keypoints
     start_time= time.time()
-    result_pe = pe_model.predict(input_path=args.input_path, plot_path=output_plot_path, plot_threshold=data_params.plot_pe_threshold)
+    result_pe = pe_model.predict(input_path=args.input_path, plot_path=output_pe_path, plot_threshold=data_params.plot_pe_threshold)
     logger.info(f"Time for extracting pose estimation: {time.time() - start_time} seconds") 
     
     keypoints_all_frames, bboxes_all_frames = result_pe["keypoints"], result_pe["bboxes"]
@@ -129,8 +131,10 @@ def main():
         resize_scale=of_params.input_model_size,
         do_crop=data_params.do_crop
     )
+    
+    output_of_path = os.path.join(output_dir, f"{base}_optical_flow.{extension}")
     start_time= time.time()
-    result_of = optical_model.predict(input_path=output_crop_path)
+    result_of = optical_model.predict(input_path=output_crop_path, output_path=output_of_path)
     logger.info(f"Time for extracting optical flow: {time.time() - start_time} seconds") 
     optical_flow_all_frames = result_of["optical_flows"]
     flows = np.stack(optical_flow_all_frames, axis=0)

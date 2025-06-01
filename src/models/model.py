@@ -70,11 +70,7 @@ class ActionRecognitionModel(nn.Module):
         return combined_feat, main_task_logits
 
 class ContrastiveActionWrapper(nn.Module):
-    def __init__(self,
-                 backbone: ActionRecognitionModel,
-                 emb_dim: int,                        
-                 num_classes_wrapper_head: int
-                ):
+    def __init__(self, backbone: ActionRecognitionModel, emb_dim:int):
         super().__init__()
         self.backbone = backbone
         backbone_output_feat_dim = self.backbone.total_feature_dimension

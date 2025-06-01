@@ -200,8 +200,7 @@ def build_model_and_optimizer(model_params:ModelArguments,
     if not train_params.add_contrastive_loss:
         model = base_model
     else:
-        num_classes_for_wrapper = model_params.num_classes
-        model = ContrastiveActionWrapper(base_model, model_params.multihead_emb_dim, num_classes_for_wrapper)
+        model = ContrastiveActionWrapper(base_model, model_params.multihead_emb_dim)
     model = model.to(train_params.device)
     
     # set optimizer and scheduler
