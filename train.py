@@ -149,7 +149,7 @@ def prepare_dataloaders(data_params:DataArguments,
     if train_params.add_contrastive_loss:
         train_dataset = SiameseKpOfDataset(train_dataset, data_params)
     
-    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_coords_file_name)
+    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_coords_file_name)
     if not os.path.exists(coord_path):
         sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
         if isinstance(sample, torch.Tensor):
@@ -436,9 +436,19 @@ def main():
             best_val_acc = val_acc
             if train_params.add_contrastive_loss:
                 weights_to_save = model.backbone.state_dict()
+                if train_params.save_stgcn_weights:
+                    torch.save(
+                        model.backbone.skel_model.state_dict(),
+                        os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_weights_file_name)
+                    )
                 print("Info: Saving backbone (ActionRecognitionModel) state_dict from ContrastiveActionWrapper.")
             else:
                 weights_to_save = model.state_dict()
+                if train_params.save_stgcn_weights:
+                    torch.save(
+                        model.skel_model.state_dict(),
+                        os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_weights_file_name)
+                    )
                 print("Info: Saving ActionRecognitionModel state_dict.")
             torch.save({
                 'epoch': epoch + 1,

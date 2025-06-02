@@ -39,6 +39,12 @@ class ActionRecognitionModel(nn.Module):
             self._flow_feat_dim = model_params.I3D_raw_feat_dim
             self._projected_flow_feat_dim = model_params.I3D_project_dim
             self.flow_feature_projector = nn.Linear(self._flow_feat_dim, self._projected_flow_feat_dim)
+
+        # for using both skeleton and optical flow, we should load the pretrained weights of ST-GCN
+        if self.use_optical_flow and not self.only_optical_flow:
+            st_gcn_weights_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_weights_file_name)
+            self.skel_model.load_state_dict(torch.load(st_gcn_weights_path))            
+            
         
         # concate feature's size, for final classifier
         self.total_feature_dimension = self._skel_feat_dim
@@ -84,7 +90,7 @@ class ContrastiveActionWrapper(nn.Module):
 if __name__ == "__main__":
     import numpy as np 
     model_args, data_args = ModelArguments(), DataArguments()
-    coords = np.load(os.path.join(model_args.pretrained_weight_dir, model_args.stgcn_coords_file_name))
+    coords = np.load(os.path.join(model_args.pretrained_weight_dir, model_args.stgcn_weights_dir_name, model_args.stgcn_coords_file_name))
     act_model = ActionRecognitionModel(model_args, data_args, coords)
     act_model.eval()
 

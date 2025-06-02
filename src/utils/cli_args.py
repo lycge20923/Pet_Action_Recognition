@@ -169,7 +169,7 @@ class ModelArguments:
         metadata={"help":"Final channel size in st-gcn"}
     )
     t_kernel_size: int =field(
-        default=9,
+        default=13,
         metadata={'help':"refer total t kernel size in temporal conv"}
     )
     num_classes: int = field(
@@ -198,7 +198,21 @@ class ModelArguments:
     )
     pretrained_weight_dir: str = field(
         default="models",
-        metadata={"help":"Weights to store pretrained weights"}
+        metadata={"help":"Root directory to store pretrained weights"}
+    )
+    stgcn_weights_dir_name: str = field(
+        default="ST_GCN",
+        metadata={"help":"Sub directory to store pretrained weights for ST_GCN(self-training)"}
+    )
+    stgcn_weights_file_name: str = field(
+        default="best.pth",
+        metadata={"help":"Weights to store pretrained weights for ST_GCN(self-training)\
+                          If you are using the training dataset whose fold num is not 0, \
+                          stronly recommended to retrained the stgcn"}
+    )
+    stgcn_coords_file_name: str = field(
+        default="coords.npy",
+        metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
     )
     I3D_weights_dir_name: str = field(
         default="I3D",
@@ -220,10 +234,7 @@ class ModelArguments:
         default=False, 
         metadata={"help":"Only use optical flow and I3D to conduct action recognition"}
     )
-    stgcn_coords_file_name: str = field(
-        default="coords.npy",
-        metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
-    )
+    
     
 @dataclass
 class AugmentationArguments:
@@ -338,4 +349,8 @@ class TrainingArguments:
     save_adjusted_args_name: str = field(
         default="args_adjusted.yaml",
         metadata={"help":"The file name for saving adjusted args, those would be used in prediction"}
+    )
+    save_stgcn_weights: bool = field(
+        default=False,
+        metadata={"help": "Whether cover the best model weight of STGCN."}
     )
