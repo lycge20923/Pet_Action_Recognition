@@ -204,8 +204,25 @@ def build_model_and_optimizer(model_params:ModelArguments,
     model = model.to(train_params.device)
     
     # set optimizer and scheduler
-    optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=1e-6)
+    if not (train_params.use_multiplie_learning_rates and model_params.add_optical_flow and (not model_params.only_optical_flow)):
+        optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
+    else:
+        stgcn_params = list(base_model.skel_model.parameters())
+        i3d_params = list(base_model.I3D.parameters())
+        stgcn_set = set(stgcn_params)
+        i3d_set = set(i3d_params)
+
+        # calculate for fuse head
+        all_params = set(model.parameters())
+        fuse_head_params = list(all_params - stgcn_set - i3d_set)
+        
+        optimizer = torch.optim.SGD([
+        {'params': stgcn_params, 'lr': train_params.branch_stgcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
+        {'params': i3d_params, 'lr': train_params.branch_I3D_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # I3D branch
+        {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay},         # fuse head branch
+        ], momentum=train_params.momentum)
+    
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=train_params.scheduler_eta_min)
     
     return {"loss":{"cross entropy": cross_entropy_loss, "contrastive learning": contrastive_loss}, "model":model, "optimizer":optimizer, "scheduler":scheduler}
 

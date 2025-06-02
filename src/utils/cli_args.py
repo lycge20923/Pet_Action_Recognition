@@ -305,6 +305,10 @@ class TrainingArguments:
         default=1e-4,
         metadata={"help": "Initial learning rate for the optimizer."}
     )
+    scheduler_eta_min: float = field(
+        default=1e-5,
+        metadata={"help":"Scheduler's eta_min"}
+    )
     train_ratio: float = field(
         default=0.8,
         metadata={"help": "Ratio of the dataset to use for training (the rest for validation)."}
@@ -353,4 +357,24 @@ class TrainingArguments:
     save_stgcn_weights: bool = field(
         default=False,
         metadata={"help": "Whether cover the best model weight of STGCN."}
+    )
+    use_multiplie_learning_rates: bool = field(
+        default_factory=False,
+        metadata={"help": "Since we use multiple branch, \
+            thus we experiment for different learning rate for different branches"}
+    )
+    branch_stgcn_learning_rate: float = field(
+        default=3e-5,
+        metadata={"help":"If use 'use_multiplie_learning_rates', then this \
+            indicate the learning rate for stgcn branch"}
+    )
+    branch_I3D_learning_rate: float = field(
+        default=1e-4,
+        metadata={"help":"If use 'use_multiplie_learning_rates', then this \
+            indicate the learning rate for I3D branch"}
+    )
+    branch_fuse_head_learning_rate: float = field(
+        default=1e-4,
+        metadata={"help":"If use 'use_multiplie_learning_rates', then this \
+            indicate the learning rate for fusing branch"}
     )
