@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..utils.cli_args import ModelArguments, DataArguments
 class Graph:
     def __init__(
         self,
@@ -200,62 +201,88 @@ class STGC_block(nn.Module):
 class ST_GCN(nn.Module):
     def __init__(
         self,
-        params,
-        data_params,
+        model_params:ModelArguments,
+        data_params:DataArguments,
         coords: np.ndarray,
     ):
         super().__init__()
+        self.add_learnable_node = model_params.add_learnable_node
         # Build graph with spatial config partitioning
         graph = Graph(
             num_nodes=data_params.num_nodes,
-            neighbor_base=params.neighbor_base,
+            neighbor_base=model_params.neighbor_base,
             coords=coords,
-            hop_size=1,
+            hop_size=model_params.hop_size,
             normalization_strategy='symmetric'
         )
         A = torch.tensor(graph.A, dtype=torch.float32, requires_grad=False)
+        
+        # add learnable node
+        if self.add_learnable_node:
+            V_ori = A.shape[1]
+            V_after = V_ori + 1
+            A_after = torch.zeros((A.shape[0], V_after, V_after), dtype=A.dtype)
+            A_after[:, :V_ori, :V_ori] = A
+            for k in range(data_params.num_nodes): # connect all
+                A_after[:, k, V_ori] = 1.0
+                A_after[:, V_ori, k] = 1.0
+            A_after[:, V_ori, V_ori] = 1.0
+            A = A_after
+            
+            # define a learnable node
+            self.global_token = nn.Parameter(torch.randn(model_params.in_channels))
+        
         self.register_buffer('A', A)
         A_size = A.size()  # (3, V, V)
         # BN over input channels * V
-        self.bn = nn.BatchNorm1d(params.in_channels * A_size[1])
+        self.bn = nn.BatchNorm1d(model_params.in_channels * A_size[1])
         # STGC blocks
         self.stgc1 = STGC_block(
-            params.in_channels,
-            params.intermediate_channels,
+            model_params.in_channels,
+            model_params.intermediate_channels,
             stride=1,
-            t_kernel_size=params.t_kernel_size,
+            t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=params.dilations
+            dilations=model_params.dilations
         )
         self.stgc2 = STGC_block(
-            params.intermediate_channels,
-            params.intermediate_channels,
+            model_params.intermediate_channels,
+            model_params.intermediate_channels,
             stride=1,
-            t_kernel_size=params.t_kernel_size,
+            t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=params.dilations
+            dilations=model_params.dilations
         )
         self.stgc3 = STGC_block(
-            params.intermediate_channels,
-            params.final_channels,
+            model_params.intermediate_channels,
+            model_params.final_channels,
             stride=2,
-            t_kernel_size=params.t_kernel_size,
+            t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=params.dilations
+            dilations=model_params.dilations
         )
         self.stgc4 = STGC_block(
-            params.final_channels,
-            params.final_channels,
+            model_params.final_channels,
+            model_params.final_channels,
             stride=1,
-            t_kernel_size=params.t_kernel_size,
+            t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=params.dilations
+            dilations=model_params.dilations
         )
         # Prediction head
-        self.fc = nn.Conv2d(params.final_channels, params.num_classes, kernel_size=1)
+        self.fc = nn.Conv2d(model_params.final_channels, model_params.num_classes, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         N, C, T, V = x.size()
+        
+        # learnable_node
+        if self.add_learnable_node:
+            V = V + 1
+            glb = self.global_token.unsqueeze(0).repeat(N, 1)
+            glb = glb.unsqueeze(-1).repeat(1, 1, T)
+            glb = glb.unsqueeze(-1)
+            x = torch.cat([x, glb], dim=-1)
+        
         # BN
         x = x.permute(0, 3, 1, 2).contiguous().view(N, V * C, T)
         x = self.bn(x)
@@ -268,5 +295,11 @@ class ST_GCN(nn.Module):
         # Global pooling + fc
         feat_4d = F.avg_pool2d(x, x.size()[2:])
         feat = feat_4d.view(N, -1)
+        
+        if self.add_learnable_node:
+            x_time_avg = x.mean(dim=2, keepdim=True)
+            global_vec = x_time_avg[:, :, 0, 17]
+        
         logits = self.fc(feat_4d).view(N, -1)
+        
         return feat, logits

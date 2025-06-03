@@ -153,7 +153,7 @@ class OutputArguments:
 @dataclass
 class ModelArguments:
     hop_size: int = field(
-        default=2,
+        default=1,
         metadata={"help":"Define what is 'neighbor'"}
     )
     in_channels: int = field(
@@ -183,6 +183,10 @@ class ModelArguments:
     dilations: List[int] = field(
         default_factory=lambda: list(DILATIONS_LIST),
         metadata={"help":"List for dilations(branches)"}
+    )
+    add_learnable_node: bool = field(
+        default=False,
+        metadata={"help":"Whether to add learnable node in ST-GCN"}
     )
     multihead_emb_dim: int = field(
         default=128, 
@@ -359,7 +363,7 @@ class TrainingArguments:
         metadata={"help": "Whether cover the best model weight of STGCN."}
     )
     use_multiplie_learning_rates: bool = field(
-        default_factory=False,
+        default=False,
         metadata={"help": "Since we use multiple branch, \
             thus we experiment for different learning rate for different branches"}
     )

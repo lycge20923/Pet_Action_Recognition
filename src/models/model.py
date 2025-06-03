@@ -18,7 +18,7 @@ class ActionRecognitionModel(nn.Module):
         
         # initiate model
         if not self.only_optical_flow: # at least we use skeleton information 
-            self.skel_model = ST_GCN(params=model_params, data_params=data_params, coords=coords)
+            self.skel_model = ST_GCN(model_params=model_params, data_params=data_params, coords=coords)
             self._skel_feat_dim = self.skel_model.fc.in_channels
         else: # skip skeleton information
             self.skel_model = None

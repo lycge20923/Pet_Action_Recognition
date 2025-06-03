@@ -477,14 +477,14 @@ def main():
                 'dataset_params': data_params, 
             }, os.path.join(saving_dir, 'best.pth'))
             patient_count = 0
-        
+        wandb.log({"best_val_acc": best_val_acc})
         # early stopping 
         if patient_count > train_params.patient_epochs:
             break
         patient_count += 1
         
     print(f"Best Validation Accuracy: {best_val_acc:.4f}")
-    wandb.log({"best_val_acc": best_val_acc})
+    
     
     run.finish()
 
