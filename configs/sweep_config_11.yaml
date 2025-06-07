@@ -5,15 +5,13 @@ metric:
   goal: maximize
 parameters:
   exec_name: # change to easily identify
-    values: ["stgcn"]
+    values: ["stgcn_I3D_middle_fusion"]
   fold_num:
     values: [0]
   # ... other parameters
   epochs:
-    values: [10000]
+    values: [200]
   batch_size:
-    values: [128]
-  add_optical_flow:
-    values: [False]
-  t_kernel_size:
-    values: [5, 9, 13, 17]
+    values: [8]
+  use_mid_level_fusion:
+    values: [True]

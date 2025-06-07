@@ -103,6 +103,25 @@ class DataArguments:
     )
     plot_pe: bool = field(default=False, metadata={"help": "Plot the results of pose estimation"})
     plot_pe_threshold: float = field(default=0.5, metadata={"help":"Threshold to show on the visualized images/videos"})
+    
+    # for adding input size for ST-GCN/I3D
+    skip_of_for_stgcn: bool = field(
+        default=True,
+        metadata={"help": "Add optical flow information in each keypoint for ST-GCN"}
+    ) 
+    
+    skip_kps_for_i3d: bool = field(
+        default=True,
+        metadata={"help": "Add keypoints information(as heatmap) in optical flow for I3D"}
+    )
+    guassian_sigma: float = field(
+        default= 2.0,
+        metadata={"help": "The sigma For heatmap(Guassian) generation"}
+    )
+    guassian_ksize_coefficient: float = field(
+        default=6,
+        metadata={"help": "The ksize For heatmap(Guassian) generation"}
+    )
 
 
 @dataclass
@@ -156,10 +175,10 @@ class ModelArguments:
         default=1,
         metadata={"help":"Define what is 'neighbor'"}
     )
-    in_channels: int = field(
-        default=3,
-        metadata={"help":"Input channel size in st-gcn"}
-    )
+    # in_channels: int = field(
+    #     default=3,
+    #     metadata={"help":"Input channel size in st-gcn"}
+    # )
     intermediate_channels: int = field(
         default=32,
         metadata={"help":"Intermediate channel size in st-gcn"}
@@ -238,7 +257,50 @@ class ModelArguments:
         default=False, 
         metadata={"help":"Only use optical flow and I3D to conduct action recognition"}
     )
-    
+    late_fusion_use_mlp: bool = field(
+        default=False, 
+        metadata={"help":"Instead using a nn.Linear, using a MLP to be the classifier"}
+    )
+    late_fusion_mlp_hidden_dim: int = field(
+        default=32,
+        metadata={"help":"MLP's hidden dimension"}
+    )
+    late_fusion_use_transformer: bool = field(
+        default=False,
+        metadata={"help":"Use transformer structure in late fusion of ST-GCN and I3D"}
+    )
+    late_fusion_transformer_k_skel_token: int = field(
+        default=4,
+        metadata={"help":"Split the skeleton feature to 'k' token"}
+    )
+    late_fusion_transformer_k_flow_token: int = field(
+        default=4,
+        metadata={"help":"Split the optical flow feature to 'k' token"}
+    )
+    late_fusion_transformer_dim: int = field(
+        default=256, 
+        metadata={"help":"Dimension of the transformer in late fusion"}
+    )
+    late_fusion_transformer_heads: int = field(
+        default=4,
+        metadata={"help":"Number of heads of the transformer in late fusion"}
+    )
+    late_fusion_transformer_layers: int = field(
+        default=2,
+        metadata={"help":"Number of layers of the transformer in late fusion"}
+    )
+    add_gate_node: bool = field(
+        default=False,
+        metadata={"help": "Whether using gate node in ST-GCN"}
+    )
+    use_mid_level_fusion: bool = field(
+        default=False, 
+        metadata={"help": "Whether to use mid fusion"}
+    )
+    mid_level_d_model: int = field(
+        default=64,
+        metadata={"help":"dimension for mid level fusion in transformer"}
+    )
     
 @dataclass
 class AugmentationArguments:
@@ -381,4 +443,8 @@ class TrainingArguments:
         default=1e-4,
         metadata={"help":"If use 'use_multiplie_learning_rates', then this \
             indicate the learning rate for fusing branch"}
+    )
+    add_prototypical_loss: bool = field(
+        default=False,
+        metadata={"help":"Whether adding prototypical loss"}
     )

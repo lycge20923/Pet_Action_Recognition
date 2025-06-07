@@ -22,6 +22,10 @@ class KpOfDataset(Dataset):
         self.model_params = model_params
         self.add_optical_flow = model_params.add_optical_flow
         self.only_optical_flow = model_params.only_optical_flow
+        
+        # determine whether using origianl data structure
+        self.skip_of_for_stgcn = data_params.skip_of_for_stgcn
+        self.skip_kps_for_i3d = data_params.skip_kps_for_i3d
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -38,7 +42,9 @@ class KpOfDataset(Dataset):
         self.num_joints = self.data_params.num_nodes
         self.num_coords = self.data_params.num_coords # Should be 3 (x,y,conf)
         
-        # self._load_annotation() # This might call _generate_keypoints
+        if not self.skip_of_for_stgcn:
+            self.num_coords = 5 
+        
 
     def __len__(self):
         return len(self.annotations)
@@ -57,17 +63,32 @@ class KpOfDataset(Dataset):
         optical_flows_tensor = None
         keypoints_tensor = None 
         
+        '''
         # optical flows
         if self.only_optical_flow or self.add_optical_flow:
-            optical_flows_np = data["optical_flows"].astype(np.float32)
+            optical_flows_np = data["optical_flows"].astype(np.float32)                
             optical_flows_np = optical_flows_np.squeeze(axis=1)
+            # determine whether using origianl data structure
+            if self.skip_kps_for_i3d:
+                optical_flows_np = optical_flows_np[:, :2, :, :]
             optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3)
             optical_flows_tensor = torch.from_numpy(optical_flows_np).float()
         if self.only_optical_flow:
             return keypoints_tensor, optical_flows_tensor, label
+        '''
+        optical_flows_np = data["optical_flows"].astype(np.float32)                
+        optical_flows_np = optical_flows_np.squeeze(axis=1)
+        if self.skip_kps_for_i3d:
+            optical_flows_np = optical_flows_np[:, :2, :, :]
+        optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3)
+        optical_flows_tensor = torch.from_numpy(optical_flows_np).float()
+        
         
         # keypoints
         keypoints_np = data["keypoints"].astype(np.float32)   # shape (T, V, 3)
+        if self.skip_of_for_stgcn:
+            keypoints_np = keypoints_np[:, :, :3]
+            
         
         # Validate shape
         expected_shape = (self.T, self.num_joints, self.num_coords)

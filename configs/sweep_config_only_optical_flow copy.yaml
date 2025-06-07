@@ -4,14 +4,9 @@ metric:
   name: best_val_acc
   goal: maximize
 parameters:
-  # can only adjust, but can't delete
   exec_name: # change to easily identify
-    values: ["stgcn&I3D"]
+    values: ["only_optical_flow"]
   fold_num:
     values: [0]
-  # ... other parameters
-  batch_size:
-    values: [16]
-  epochs:
-    values: [100]
-  
+  only_optical_flow:
+    values: [True, False]

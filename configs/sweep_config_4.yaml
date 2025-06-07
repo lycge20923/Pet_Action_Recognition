@@ -10,8 +10,11 @@ parameters:
   fold_num:
     values: [0]
   # ... other parameters
-  batch_size:
-    values: [16]
   epochs:
+    values: [200]
+  scheduler_eta_min:
+    values: [1e-5]
+  patient_epochs:
     values: [100]
-  
+  use_multiplie_learning_rates:
+    values: [True]

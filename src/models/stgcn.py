@@ -122,6 +122,7 @@ class STGC_block(nn.Module):
         A_size: tuple,
         dropout: float = 0.5,
         dilations: list = None,
+        add_gate_node: bool = False
     ):
         super().__init__()
         # spatial
@@ -185,16 +186,100 @@ class STGC_block(nn.Module):
         else:
             self.residual = nn.Identity()
         self.relu = nn.ReLU()
-
-    def forward(self, x: torch.Tensor, A: torch.Tensor) -> torch.Tensor:
-        res = self.residual(x)
-        out = self.sgc(x, A * self.M)
         
+        # for node gate
+        self.add_gate_node = add_gate_node
+        if add_gate_node:
+            self.node_gate = nn.Sequential(
+                nn.Linear(2, 8),
+                nn.ReLU(),
+                nn.Linear(8, 1),
+                nn.Sigmoid()
+            )
+        
+
+    def forward(
+            self,
+            x: torch.Tensor,                # 当前层的特征（[N, C_feat, T_in, V]）
+            orig_coords: torch.Tensor,      # 一直不变的“Bone keypoints (x_pix,y_pix)” [N, 2, T_orig, V]
+            x_flow: torch.Tensor,           # dense 光流 [N, 2, T_orig, H, W]
+            A: torch.Tensor
+        ) -> torch.Tensor:
+        """
+        x:         [N, C_feat, T_in, V]
+        orig_coords: [N, 2, T_orig, V]
+        x_flow:    [N, 2, T_orig, H, W]
+        A:         [3, V, V]
+        """
+        # 1) 残差 + 空间卷积 + 时序卷积 → 得到 out: [N, C_out, T_out, V]
+        res = self.residual(x)
+        out = self.sgc(x, A * self.M)       # [N, C_out, T_in, V]
         if not self.dilations:
-            out = self.tgc(out)
+            out = self.tgc(out)             # [N, C_out, T_out, V]
         else:
-            branch_outs = [branch(out) for branch in self.t_branches]
-            out = sum(branch_outs)
+            branch_outs = [b(out) for b in self.t_branches]
+            out = sum(branch_outs)          # [N, C_out, T_out, V]
+
+        N, C_out, T_out, V = out.shape
+        # —— 2) 这里要用 orig_coords，而不是 x[:,0,:,:] —— 
+        if x_flow is not None and self.add_gate_node:
+            # 2.1 从 orig_coords 中提取关键点像素坐标 (x_pix, y_pix)：
+            #      orig_coords[:,0,t,i] = x_pixel^(t)_i
+            #      orig_coords[:,1,t,i] = y_pixel^(t)_i
+            x_pix = orig_coords[:, 0, :, :].clone()  # [N, T_orig, V]
+            y_pix = orig_coords[:, 1, :, :].clone()  # [N, T_orig, V]
+
+            # 2.2 把像素坐标归一化到 [-1, +1]
+            H, W = x_flow.size(3), x_flow.size(4)    # e.g. 256,256
+            x_norm = (x_pix / (W - 1)) * 2.0 - 1.0   # [N, T_orig, V]
+            y_norm = (y_pix / (H - 1)) * 2.0 - 1.0   # [N, T_orig, V]
+
+            # 2.3 拼成 grid: [N, T_orig, V, 2]
+            grid = torch.stack((x_norm, y_norm), dim=-1)  # [N, T_orig, V, 2]
+
+            # 2.4 把 dense 光流 [N,2,T_orig,H,W] → [N*T_orig, 2, H, W]
+            orig_T = x_flow.size(2)
+            flow_reshape = x_flow.permute(0, 2, 1, 3, 4).contiguous()  # [N, T_orig, 2, H, W]
+            flow_reshape = flow_reshape.view(N * orig_T, 2, H, W)      # [N*T_orig, 2, H, W]
+
+            # 2.5 grid reshape → [N*T_orig, 1, V, 2]
+            grid_reshape = grid.contiguous().view(N * orig_T, V, 2)  # [N*T_orig, V, 2]
+            grid_reshape = grid_reshape.unsqueeze(1)                 # [N*T_orig, 1, V, 2]
+
+            # 2.6 用 grid_sample → [N*T_orig, 2, 1, V]
+            flow_sampled = F.grid_sample(
+                flow_reshape,      # [N*T_orig, 2, H, W]
+                grid_reshape,      # [N*T_orig, 1, V, 2]
+                mode='bilinear',
+                padding_mode='border',
+                align_corners=True
+            )  # → [N*T_orig, 2, 1, V]
+
+            # 2.7 reshape 回 [N, 2, T_orig, V]
+            flow_sampled = flow_sampled.view(N, orig_T, 2, 1, V)    # [N, T_orig, 2, 1, V]
+            flow_sampled = flow_sampled.squeeze(3)                  # [N, T_orig, 2, V]
+            flow_at_kp   = flow_sampled.permute(0, 2, 1, 3)         # [N, 2, T_orig, V]
+
+            # 2.8 如果当前层做了 time‐downsample (T_out < T_orig)，就对 [N,2,T_orig,V] 插值到 [N,2,T_out,V]
+            if flow_at_kp.size(2) != T_out:
+                flow_at_kp_ds = F.interpolate(
+                    flow_at_kp.view(N, 2, flow_at_kp.size(2), V),  # [N,2,T_orig,V]
+                    size=(T_out, V),
+                    mode='bilinear',
+                    align_corners=True
+                )  # → [N,2,T_out,V]
+            else:
+                flow_at_kp_ds = flow_at_kp  # [N,2,T_out,V]
+
+            # 2.9 Node Gate：permute→view→MLP→reshape→unsqueeze→repeat → [N,C_out,T_out,V]
+            uv_flat     = flow_at_kp_ds.permute(0, 2, 3, 1).contiguous().view(N * T_out * V, 2)  # [N*T_out*V,2]
+            alpha_flat  = self.node_gate(uv_flat)                                                 # [N*T_out*V,1]
+            alpha       = alpha_flat.view(N, T_out, V).unsqueeze(1)                                # [N,1,T_out,V]
+            alpha_expand = alpha.repeat(1, C_out, 1, 1)                                            # [N,C_out,T_out,V]
+
+            out = out * alpha_expand  # [N,C_out,T_out,V] × [N,C_out,T_out,V]
+
+        # 3) 残差 + ReLU
         out = out + res
         return self.relu(out)
 
@@ -230,20 +315,21 @@ class ST_GCN(nn.Module):
             A = A_after
             
             # define a learnable node
-            self.global_token = nn.Parameter(torch.randn(model_params.in_channels))
+            self.global_token = nn.Parameter(torch.randn(data_params.num_coords))
         
         self.register_buffer('A', A)
         A_size = A.size()  # (3, V, V)
         # BN over input channels * V
-        self.bn = nn.BatchNorm1d(model_params.in_channels * A_size[1])
+        self.bn = nn.BatchNorm1d(data_params.num_coords * A_size[1])
         # STGC blocks
         self.stgc1 = STGC_block(
-            model_params.in_channels,
+            data_params.num_coords,
             model_params.intermediate_channels,
             stride=1,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilations=model_params.dilations,
+            add_gate_node=model_params.add_gate_node
         )
         self.stgc2 = STGC_block(
             model_params.intermediate_channels,
@@ -251,7 +337,8 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilations=model_params.dilations,
+            add_gate_node=model_params.add_gate_node
         )
         self.stgc3 = STGC_block(
             model_params.intermediate_channels,
@@ -259,7 +346,8 @@ class ST_GCN(nn.Module):
             stride=2,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilations=model_params.dilations,
+            add_gate_node=model_params.add_gate_node
         )
         self.stgc4 = STGC_block(
             model_params.final_channels,
@@ -267,14 +355,15 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilations=model_params.dilations,
+            add_gate_node=model_params.add_gate_node
         )
         # Prediction head
         self.fc = nn.Conv2d(model_params.final_channels, model_params.num_classes, kernel_size=1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, x_flow:torch.Tensor=None) -> torch.Tensor:
         N, C, T, V = x.size()
-        
+        orig_coords = x
         # learnable_node
         if self.add_learnable_node:
             V = V + 1
@@ -288,10 +377,10 @@ class ST_GCN(nn.Module):
         x = self.bn(x)
         x = x.view(N, V, C, T).permute(0, 2, 3, 1).contiguous()
         # STGC blocks
-        x = self.stgc1(x, self.A)
-        x = self.stgc2(x, self.A)
-        x = self.stgc3(x, self.A)
-        x = self.stgc4(x, self.A)
+        x = self.stgc1(x, orig_coords, x_flow, self.A)
+        x = self.stgc2(x, orig_coords, x_flow, self.A)
+        x = self.stgc3(x, orig_coords, x_flow, self.A)
+        x = self.stgc4(x, orig_coords, x_flow, self.A)
         # Global pooling + fc
         feat_4d = F.avg_pool2d(x, x.size()[2:])
         feat = feat_4d.view(N, -1)

@@ -34,9 +34,12 @@ def setup_experiments():
     # load parameters and add to wandb
     model_params = load_from_wandb(ModelArguments, config)
     train_params = load_from_wandb(TrainingArguments, config)
+    data_params = load_from_wandb(DataArguments, config)
+    # for interconnected
+    data_params.num_coords = 5 if not data_params.skip_of_for_stgcn else 3
     aug_params_train = load_from_wandb(AugmentationArguments, config)
     aug_params_eval = AugmentationArguments(augment=False)
-    data_params = DataArguments()
+    
     
     # saving dir
     now = datetime.now()

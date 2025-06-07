@@ -1,3 +1,4 @@
+import cv2
 import os
 import json
 import logging
@@ -12,13 +13,20 @@ from ..utils.cli_args import DataArguments
 from ..utils.logging_utils import setup_logger
 
 
-def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir):
+def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir, args:DataArguments):
     """
     For each clip annotation, slice into windows, sample frames,
     save each window's features once, and return a flat list of metadata.
     """
     all_meta = []
     sample_id = 0
+    
+    # for guassian heatmap generation
+    sigma = args.guassian_sigma
+    ksize = int(args.guassian_ksize_coefficient * sigma + 1)
+    gk1d = cv2.getGaussianKernel(ksize, sigma) 
+    gk2d = np.outer(gk1d, gk1d)
+    
     for ann in tqdm(annotations, desc="Saving windows"):
         data = np.load(ann["feature_file_path"])
         kps = data["keypoints"]
@@ -34,12 +42,48 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
             )
             kp_s = kps[idxs]
             of_s = ofs[idxs]
+            
+            # for guassian heatmap generation
+            H, W = of_s.shape[-2:]
+            num_samples_actual, num_nodes, _ = kp_s.shape
+            kp_s_ext = np.zeros((num_samples_actual, num_nodes, 5), dtype=np.float32)
+            of_s_ext = np.zeros((num_samples_actual, 1, 3, H, W), dtype=of_s.dtype)
+            for i in range(num_samples_actual):
+                of_s_ext[i, 0, 0:2, :, :] = of_s[i, 0, :, :, :]
+                heatmap = np.zeros((H, W), dtype=of_s.dtype)
+                for j in range(num_nodes):
+                    
+                    # for ST-GCN input
+                    nx, ny, conf = kp_s[i, j]
+                    px, py = int(round(nx * (W - 1))), int(round(ny * (H - 1)))
+                    px, py = np.clip(px, 0, W - 1), np.clip(py, 0, H - 1)
+                    u, v = of_s[i, 0, 0, py, px], of_s[i, 0, 1, py, px]
+                    kp_s_ext[i, j, 0] = nx
+                    kp_s_ext[i, j, 1] = ny
+                    kp_s_ext[i, j, 2] = conf
+                    kp_s_ext[i, j, 3] = u    
+                    kp_s_ext[i, j, 4] = v
+                    
+                    # for I3D
+                    half = ksize // 2
+                    x0, x1 = px - half, px + half + 1
+                    y0, y1 = py - half, py + half + 1 
+                    gx0, gy0 = max(0, -x0),  max(0, -y0)
+                    gx1, gy1 = min(ksize, W - x0), min(ksize, H - y0)
+                    hx0, hy0 = max(0, x0),  max(0, y0)
+                    hx1, hy1= min(W, x1), min(H, y1)
+                    heatmap[hy0:hy1, hx0:hx1] += gk2d[gy0:gy1, gx0:gx1]
+                
+                of_s_ext[i, 0, 2, :, :] = heatmap
+            
+            kp_to_save = kp_s_ext
+            of_to_save = of_s_ext
 
             feat_path = os.path.join(np_save_dir, f"{sample_id:06d}.npz")
             np.savez_compressed(
                 feat_path,
-                keypoints=kp_s,
-                optical_flows=of_s
+                keypoints=kp_to_save,
+                optical_flows=of_to_save
             )
 
             all_meta.append({
@@ -91,7 +135,8 @@ def main():
         raw_anns,
         window_size=args.window_size,
         num_samples=args.num_samples,
-        np_save_dir=np_save_dir
+        np_save_dir=np_save_dir,
+        args=args
     )
     # for temp test
     # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'r') as f:

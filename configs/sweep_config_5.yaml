@@ -15,5 +15,5 @@ parameters:
     values: [128]
   add_optical_flow:
     values: [False]
-  t_kernel_size:
-    values: [5, 9, 13, 17]
+  skip_of_for_stgcn:
+    values: [False]
