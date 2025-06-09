@@ -1,6 +1,7 @@
 '''
-This may be a bit messy, but please ensure that any parameter names are unique, 
-even if they belong to different classes.
+The parameters may be a bit messy, but please ensure the following:
+1. If you create a new parameter, make sure its name does not conflict with any existing ones, even if they belong to different classes.
+2. In addition to creating new parameters for better management, it is recommended to customize your training process using a YAML configuration file similar to those in the configs directory.
 '''
 
 from dataclasses import dataclass, field
@@ -10,63 +11,32 @@ import torch
 DEFAULT_ACTIONS_LIST = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
            "Coughing", "Seizures", "Vomiting", "Abnormal Movement"]
 DEFAULT_SKELETON_LIST = [[0, 1], [0, 2], [1, 2], [2, 3], [3, 4], [3, 5], [5, 6], [6, 7], [3, 8], [8, 9], [9, 10], [4, 14], [14, 15], [15, 16], [4, 11], [11, 12], [12, 13]]
-DILATIONS_LIST = [1] # [1, 2, 3]
+# DILATIONS_LIST = [1] # [1, 2, 3]
 @dataclass
 class DataArguments:
     actions: List[str] = field(
         default_factory=lambda: list(DEFAULT_ACTIONS_LIST),
         metadata={"help": "List of action categories to be recognized."}
     )
+    ##############################
+    ### for data preprocessing ###
+    ##############################
+    # --- for download and segment ---
     data_dir: str = field(
         default="data",
-        metadata={"help": "Destination path of downloaded videos"}
+        metadata={"help":"Root directory for storing all data, including raw and preprocessed versions."}
     )
     raw_dir_name: str = field(
         default="raw",
-        metadata={"help": "Original dataset dir name"}
+        metadata={"help":"Subdirectory name for storing the original downloaded videos."}
     )
     seg_dir_name: str = field(
         default="segmented",
-        metadata={"help": "Segmented dataset dir name"}
-    )
-    stabilized_dir_name: str = field(
-        default="stabilized",
-        metadata={"help":"Stabilized dataset dir name"}
-    )
-    # for ablation study
-    skip_stabilization: bool = field(
-        default= False,
-        metadata={"help":"Whether it would skip the step for video stabilization"}
-    )
-    # for ablation study
-    stabilized_crop_percentage: float = field(
-        default= 0.9,
-        metadata={"help":"The cropping ratio for video stabilization"}
-    )
-    feature_extract_dir_name: str = field(
-        default="feature_extracted",
-        metadata={"help": "Pose_estimation dataset dir name"}
-    )
-    # for ablation study
-    do_crop: bool = field(
-        default=True,
-        metadata={"help":"Doing crop before feed the segments for optical flow extraction"}
-    )
-    trainsplit_dir_name: str = field(
-        default="train_split",
-        metadata={"help":"After 5-fold split"}
-    )
-    num_folds: int = field(
-        default=5,
-        metadata={"help":"Conduct x-fold cross-validation"}
-    )
-    fold_allow_diff: int = field(
-        default= 200, 
-        metadata={"help": "The maximum for the difference of the number of samples"}
+        metadata={"help":"Subdirectory name for storing action-segmented videos."}
     )
     metadata_name: str = field(
         default="metadata.csv",
-        metadata={"help": "Name of the metadata file"}
+        metadata={"help":"Name of the metadata CSV file to be used."}
     )
     operation: Literal["extend", "reload"] = field(
         default="reload",
@@ -74,11 +44,46 @@ class DataArguments:
     )
     drive_url: str = field(
         default="https://docs.google.com/spreadsheets/d/10UWZqFRBe5JKn8gc0GOzNIlZilEwLHGP2AjiCc1Hj-I/export?format=csv",
-        metadata={"help": "Website url of public google drive"}
+        metadata={"help": "URL of the Excel file stored on Google Drive."}
     )
-    annotation_file_name: str = field(
-        default="annotation.json",
-        metadata={"help":"Annotation name for storing data"}
+    # --- for video stabilization ---
+    stabilized_dir_name: str = field(
+        default="stabilized",
+        metadata={"help":"Subdirectory name for storing stabilized videos."}
+    )
+    # possible parameter for ablation study
+    skip_stabilization: bool = field(
+        default= False,
+        metadata={"help":"Indicates whether the video stabilization step should be skipped."}
+    )
+    stabilized_crop_percentage: float = field(
+        default= 0.9,
+        metadata={"help":"Defines the cropping ratio to remove black borders that may appear due to video stabilization."}
+    )
+    # --- for feature extraction ---
+    feature_extract_dir_name: str = field(
+        default="feature_extracted",
+        metadata={"help": "Subdirectory name for storing the results of keypoint detection and optical flow."}
+    )
+    # possible parameter for ablation study
+    do_crop: bool = field(
+        default=True,
+        metadata={"help":"Cropping is performed before feeding the segments into the optical flow extractor."}
+    )
+    plot_pe: bool = field(default=False, metadata={"help": "Plot the results of pose estimation"})
+    plot_pe_threshold: float = field(default=0.5, metadata={"help":"Threshold to show on the visualized images/videos"})
+    # --- for train-val & 5-fold split ---
+    trainsplit_dir_name: str = field(
+        default="train_split",
+        metadata={"help":"Subdirectory name for storing data after x-fold split."}
+    )
+    num_folds: int = field(
+        default=5,
+        metadata={"help":"Number of folds to use for cross-validation."}
+    )
+    fold_allow_diff: int = field(
+        default=200, 
+        metadata={"help":"The maximum allowed difference in the number of samples between action classes."}
     )
     min_kp_rate: float = field(
         default=0.5,
@@ -86,30 +91,31 @@ class DataArguments:
     )
     window_size: int = field(
         default=64, 
-        metadata={"help":"Frame number for splitting"}
+        metadata={"help":"Number of consecutive frames used to form a window segment for sampling."}
     )
-    # for ablation study
+    # possible parameter for ablation study
     num_samples: int = field(
         default=32,
-        metadata={"help":"Sampling number for inputing to model"}
+        metadata={"help":"Number of sampled frames from each window as input to the model."}
+    )
+    annotation_file_name: str = field(
+        default="annotation.json",
+        metadata={"help":"Filename of the annotation file used to store data."}
     )
     num_nodes: int = field(
         default=17,
-        metadata={"help":"Number of nodes"}
+        metadata={"help":"The defined number of keypoints that can be detected"}
     )
     num_coords: int = field(
         default=3,
         metadata={"help":"The size of each coordination"}
     )
-    plot_pe: bool = field(default=False, metadata={"help": "Plot the results of pose estimation"})
-    plot_pe_threshold: float = field(default=0.5, metadata={"help":"Threshold to show on the visualized images/videos"})
-
 
 @dataclass
 class PoseEstimationArguments:
     model_dir: str = field(
         default="models/pe",
-        metadata={"help":"Dir storing models"}
+        metadata={"help":"Directory for storing weight of the pose estimation model."}
     )
     model_type: Literal['s', 'b', 'l', 'h'] = field(
         default="h",
@@ -132,15 +138,15 @@ class PoseEstimationArguments:
 class OpticalFlowArguments:
     model_url_name: str =field(
         default="MemorySlices/Tartan-C-T-TSKH-spring540x960-M",
-        metadata={"help":"model name for optical flow"}
+        metadata={"help":"Model identifier or path used for optical flow inference."}
     )
     cfg: str = field(
         default="features/SEA_RAFT/config/eval/spring-M.json",
-        metadata={"help":"The config for initiate optical flow model"}
+        metadata={"help":"Configuration file to initialize the optical flow model."}
     )
     input_model_size: List[int] = field(
         default_factory=lambda: list([256, 256]),
-        metadata={"help":"Input size for 3D CNN"}
+        metadata={"help":"Input resolution for the 3D CNN model (height, width)."}
     )
 
 @dataclass
@@ -180,22 +186,14 @@ class ModelArguments:
         default_factory=lambda: list(DEFAULT_SKELETON_LIST),
         metadata={"help": "List of skeleton (node pairs) to be recognized."}
     )
-    dilations: List[int] = field(
-        default_factory=lambda: list(DILATIONS_LIST),
-        metadata={"help":"List for dilations(branches)"}
-    )
-    add_learnable_node: bool = field(
-        default=False,
-        metadata={"help":"Whether to add learnable node in ST-GCN"}
+    dilation: int = field(
+        default=1,
+        metadata={"help":"Dilation for ST-GCN"}
     )
     multihead_emb_dim: int = field(
         default=128, 
         metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
     )
-    # add_velocity: bool = field(
-    #     default=False,
-    #     metadata={"help":"Add (x_diff, y_diff) in information of keypoints"}
-    # )
     add_optical_flow: bool = field(
         default=True,
         metadata={"help":"Whether adding optical flow"}

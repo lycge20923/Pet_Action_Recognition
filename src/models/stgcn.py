@@ -34,7 +34,7 @@ class Graph:
         # Precompute hop distance
         self.hop_dis = self._get_hop_distance()
 
-        # --- MODIFIED: compute skeleton centroid and distances ---
+        # compute one skeleton centroid and distances ---
         self.coords = coords
         self.center = coords.mean(axis=0)
         self.dist2center = np.linalg.norm(coords - self.center, axis=1)
@@ -43,13 +43,16 @@ class Graph:
         self.A = self._get_adjacency_spatial()
 
     def _get_hop_distance(self) -> np.ndarray:
+        '''
+        Return shortest distances
+        '''
         # adjacency matrix
         A = np.zeros((self.num_nodes, self.num_nodes))
         for i, j in self.edges:
             A[i, j] = A[j, i] = 1
         # powers for hops
-        mats = [np.linalg.matrix_power(A, d) for d in range(self.hop_size + 1)]
-        reach = (np.stack(mats) > 0)
+        mats = [np.linalg.matrix_power(A, d) for d in range(self.hop_size + 1)] # include A^0 & A^1
+        reach = (np.stack(mats) > 0) # -> (2, 17, 17)
         hop_dis = np.full((self.num_nodes, self.num_nodes), np.inf)
         for d in range(self.hop_size, -1, -1):
             hop_dis[reach[d]] = d
@@ -121,7 +124,7 @@ class STGC_block(nn.Module):
         t_kernel_size: int,
         A_size: tuple,
         dropout: float = 0.5,
-        dilations: list = None,
+        dilation: list = None,
     ):
         super().__init__()
         # spatial
@@ -131,46 +134,22 @@ class STGC_block(nn.Module):
             s_kernel_size=A_size[0]
         )
         self.M = nn.Parameter(torch.ones(A_size))
-        self.dilations = dilations
-        
-        # for No dilations
-        if not self.dilations:
-            self.tgc = nn.Sequential(
-                nn.BatchNorm2d(out_channels),
-                nn.ReLU(),
-                nn.Dropout(p=dropout),
-                nn.Conv2d(
-                    in_channels=out_channels,
-                    out_channels=out_channels,
-                    kernel_size=(t_kernel_size, 1),
-                    stride=(stride, 1),
-                    padding=((t_kernel_size - 1) // 2, 0)
-                ),
-                nn.BatchNorm2d(out_channels)
-            )
-        # for dilations
-        else:
-            self.t_branches = nn.ModuleList()
-            for d in dilations:
-                pad = d * ((t_kernel_size - 1) // 2)
-                self.t_branches.append(
-                    nn.Sequential(
-                        nn.BatchNorm2d(out_channels),
-                        nn.ReLU(),
-                        nn.Dropout(p=dropout),
-                        nn.Conv2d(
-                            in_channels=out_channels,
-                            out_channels=out_channels,
-                            kernel_size=(t_kernel_size, 1),
-                            stride=(stride, 1),
-                            padding=(pad, 0),
-                            dilation=(d, 1),
-                        ),
-                        nn.BatchNorm2d(out_channels),
-                        nn.ReLU(),
-                    )
-                )
-        
+        self.tgc = nn.Sequential(
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(),
+            nn.Dropout(p=dropout),
+            nn.Conv2d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=(t_kernel_size, 1),
+                stride=(stride, 1),
+                padding=((t_kernel_size - 1) // 2, 0),
+                dilation = (dilation, 1)
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU()
+        )
+
         # residual
         if stride != 1 or in_channels != out_channels:
             self.residual = nn.Sequential(
@@ -189,12 +168,7 @@ class STGC_block(nn.Module):
     def forward(self, x: torch.Tensor, A: torch.Tensor) -> torch.Tensor:
         res = self.residual(x)
         out = self.sgc(x, A * self.M)
-        
-        if not self.dilations:
-            out = self.tgc(out)
-        else:
-            branch_outs = [branch(out) for branch in self.t_branches]
-            out = sum(branch_outs)
+        out = self.tgc(out)
         out = out + res
         return self.relu(out)
 
@@ -206,7 +180,6 @@ class ST_GCN(nn.Module):
         coords: np.ndarray,
     ):
         super().__init__()
-        self.add_learnable_node = model_params.add_learnable_node
         # Build graph with spatial config partitioning
         graph = Graph(
             num_nodes=data_params.num_nodes,
@@ -216,21 +189,6 @@ class ST_GCN(nn.Module):
             normalization_strategy='symmetric'
         )
         A = torch.tensor(graph.A, dtype=torch.float32, requires_grad=False)
-        
-        # add learnable node
-        if self.add_learnable_node:
-            V_ori = A.shape[1]
-            V_after = V_ori + 1
-            A_after = torch.zeros((A.shape[0], V_after, V_after), dtype=A.dtype)
-            A_after[:, :V_ori, :V_ori] = A
-            for k in range(data_params.num_nodes): # connect all
-                A_after[:, k, V_ori] = 1.0
-                A_after[:, V_ori, k] = 1.0
-            A_after[:, V_ori, V_ori] = 1.0
-            A = A_after
-            
-            # define a learnable node
-            self.global_token = nn.Parameter(torch.randn(model_params.in_channels))
         
         self.register_buffer('A', A)
         A_size = A.size()  # (3, V, V)
@@ -243,7 +201,7 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilation=model_params.dilation
         )
         self.stgc2 = STGC_block(
             model_params.intermediate_channels,
@@ -251,7 +209,7 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilation=model_params.dilation
         )
         self.stgc3 = STGC_block(
             model_params.intermediate_channels,
@@ -259,7 +217,7 @@ class ST_GCN(nn.Module):
             stride=2,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilation=model_params.dilation
         )
         self.stgc4 = STGC_block(
             model_params.final_channels,
@@ -267,7 +225,7 @@ class ST_GCN(nn.Module):
             stride=1,
             t_kernel_size=model_params.t_kernel_size,
             A_size=A_size,
-            dilations=model_params.dilations
+            dilation=model_params.dilation
         )
         # Prediction head
         self.fc = nn.Conv2d(model_params.final_channels, model_params.num_classes, kernel_size=1)
@@ -275,30 +233,20 @@ class ST_GCN(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         N, C, T, V = x.size()
         
-        # learnable_node
-        if self.add_learnable_node:
-            V = V + 1
-            glb = self.global_token.unsqueeze(0).repeat(N, 1)
-            glb = glb.unsqueeze(-1).repeat(1, 1, T)
-            glb = glb.unsqueeze(-1)
-            x = torch.cat([x, glb], dim=-1)
-        
         # BN
         x = x.permute(0, 3, 1, 2).contiguous().view(N, V * C, T)
         x = self.bn(x)
         x = x.view(N, V, C, T).permute(0, 2, 3, 1).contiguous()
+        
         # STGC blocks
         x = self.stgc1(x, self.A)
         x = self.stgc2(x, self.A)
         x = self.stgc3(x, self.A)
         x = self.stgc4(x, self.A)
+        
         # Global pooling + fc
         feat_4d = F.avg_pool2d(x, x.size()[2:])
         feat = feat_4d.view(N, -1)
-        
-        if self.add_learnable_node:
-            x_time_avg = x.mean(dim=2, keepdim=True)
-            global_vec = x_time_avg[:, :, 0, 17]
         
         logits = self.fc(feat_4d).view(N, -1)
         
