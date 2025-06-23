@@ -5,7 +5,7 @@ The parameters may be a bit messy, but please ensure the following:
 '''
 
 from dataclasses import dataclass, field
-from typing import Literal, List
+from typing import Literal, List, Optional
 import torch
 
 DEFAULT_ACTIONS_LIST = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
@@ -23,8 +23,8 @@ class DataArguments:
     ##############################
     # --- for download and segment ---
     data_dir: str = field(
-        default="data",
-        metadata={"help":"Root directory for storing all data, including raw and preprocessed versions."}
+        default="data/main",
+        metadata={"help":"Root directory for storing all main data, including raw and preprocessed versions."}
     )
     raw_dir_name: str = field(
         default="raw",
@@ -166,14 +166,18 @@ class ModelArguments:
         default=3,
         metadata={"help":"Input channel size in st-gcn"}
     )
-    intermediate_channels: int = field(
-        default=32,
-        metadata={"help":"Intermediate channel size in st-gcn"}
+    base_channels: int = field(
+        default=64, 
+        metadata={"help":"Base channel size in gcn."}
     )
-    final_channels: int = field(
-        default=128,
-        metadata={"help":"Final channel size in st-gcn"}
-    )
+    # intermediate_channels: int = field(
+    #     default=32,
+    #     metadata={"help":"Intermediate channel size in st-gcn"}
+    # )
+    # final_channels: int = field(
+    #     default=128,
+    #     metadata={"help":"Final channel size in st-gcn"}
+    # )
     t_kernel_size: int =field(
         default=13,
         metadata={'help':"refer total t kernel size in temporal conv"}
@@ -202,18 +206,39 @@ class ModelArguments:
         default="models",
         metadata={"help":"Root directory to store pretrained weights"}
     )
-    stgcn_weights_dir_name: str = field(
-        default="ST_GCN",
+    gcn_weights_dir_name: str = field(
+        default="GCN",
         metadata={"help":"Sub directory to store pretrained weights for ST_GCN(self-training)"}
     )
-    stgcn_weights_file_name: str = field(
-        default="best.pth",
-        metadata={"help":"Weights to store pretrained weights for ST_GCN(self-training)\
+    gcn_model_name: Literal["stgcn", "tdgcn", "degcn"] = field(
+        default="tdgcn",
+        metadata={"help": "The model for training and predict. Now we only have ST-GCN & TD-GCN"}
+    )
+    gcn_weights_file_template: str = field(
+        default="best_{}.pth",
+        metadata={"help":"Weights to store pretrained weights for GCN(self-training)\
                           If you are using the training dataset whose fold num is not 0, \
-                          stronly recommended to retrained the stgcn"}
+                          stronly recommended to retrained the gcn"}
+    )
+    @property
+    def gcn_weights_file_name(self) -> Optional[str]:
+        return self.gcn_weights_file_template.format(self.gcn_model_name)
+    
+    gcn_include_blocks: List[int] = field(
+        default_factory=lambda: [1, 5, 8, 10],
+        metadata={"help": "Which GCN blocks to include (1~10)"}
+    )
+    degcn_num_streams: int = field(
+        default=2, 
+        metadata= {"help": "The number of streams used in DE-GCN"}
+    )
+    
+    load_gcn_weights: bool = field(
+        default=False, 
+        metadata={"help":"Whether continue training using pre-trained ST-GCN"}
     )
     stgcn_coords_file_name: str = field(
-        default="coords.npy",
+        default="coords_stgcn.npy",
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
     )
     I3D_weights_dir_name: str = field(
@@ -356,7 +381,7 @@ class TrainingArguments:
         default="args_adjusted.yaml",
         metadata={"help":"The file name for saving adjusted args, those would be used in prediction"}
     )
-    save_stgcn_weights: bool = field(
+    save_gcn_weights: bool = field(
         default=False,
         metadata={"help": "Whether cover the best model weight of STGCN."}
     )

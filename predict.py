@@ -157,7 +157,7 @@ def main():
     
     # ---prediction ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_coords_file_name)
+    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
     coords = np.load(coord_path)
     model = ActionRecognitionModel(model_params, data_params, coords).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)

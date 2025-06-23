@@ -194,41 +194,69 @@ class ST_GCN(nn.Module):
         A_size = A.size()  # (3, V, V)
         # BN over input channels * V
         self.bn = nn.BatchNorm1d(model_params.in_channels * A_size[1])
+        
         # STGC blocks
-        self.stgc1 = STGC_block(
-            model_params.in_channels,
-            model_params.intermediate_channels,
-            stride=1,
-            t_kernel_size=model_params.t_kernel_size,
-            A_size=A_size,
-            dilation=model_params.dilation
-        )
-        self.stgc2 = STGC_block(
-            model_params.intermediate_channels,
-            model_params.intermediate_channels,
-            stride=1,
-            t_kernel_size=model_params.t_kernel_size,
-            A_size=A_size,
-            dilation=model_params.dilation
-        )
-        self.stgc3 = STGC_block(
-            model_params.intermediate_channels,
-            model_params.final_channels,
-            stride=2,
-            t_kernel_size=model_params.t_kernel_size,
-            A_size=A_size,
-            dilation=model_params.dilation
-        )
-        self.stgc4 = STGC_block(
-            model_params.final_channels,
-            model_params.final_channels,
-            stride=1,
-            t_kernel_size=model_params.t_kernel_size,
-            A_size=A_size,
-            dilation=model_params.dilation
-        )
+        block_confs = {
+            1: dict(in_c=model_params.in_channels,      out_c=model_params.base_channels,      stride=1),
+            2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
+            3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
+            4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
+            5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
+            6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
+            7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
+            8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
+            9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
+            10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
+        }
+        
+        self.blocks = nn.ModuleList()
+        for idx in sorted(model_params.gcn_include_blocks):
+            conf = block_confs[idx]
+            self.blocks.append(
+                STGC_block(
+                    conf['in_c'], conf['out_c'],
+                    stride=conf['stride'],
+                    t_kernel_size=model_params.t_kernel_size,
+                    A_size=A_size,
+                    dilation=model_params.dilation
+                )
+            )
+        
+        
+        # self.stgc1 = STGC_block(
+        #     model_params.in_channels,
+        #     model_params.base_channels,
+        #     stride=1,
+        #     t_kernel_size=model_params.t_kernel_size,
+        #     A_size=A_size,
+        #     dilation=model_params.dilation
+        # )
+        # self.stgc2 = STGC_block(
+        #     model_params.base_channels,
+        #     model_params.base_channels,
+        #     stride=1,
+        #     t_kernel_size=model_params.t_kernel_size,
+        #     A_size=A_size,
+        #     dilation=model_params.dilation
+        # )
+        # self.stgc3 = STGC_block(
+        #     model_params.base_channels*2,
+        #     model_params.base_channels*4,
+        #     stride=2,
+        #     t_kernel_size=model_params.t_kernel_size,
+        #     A_size=A_size,
+        #     dilation=model_params.dilation
+        # )
+        # self.stgc4 = STGC_block(
+        #     model_params.base_channels*4,
+        #     model_params.base_channels*4,
+        #     stride=1,
+        #     t_kernel_size=model_params.t_kernel_size,
+        #     A_size=A_size,
+        #     dilation=model_params.dilation
+        # )
         # Prediction head
-        self.fc = nn.Conv2d(model_params.final_channels, model_params.num_classes, kernel_size=1)
+        self.fc = nn.Conv2d(model_params.base_channels*4, model_params.num_classes, kernel_size=1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         N, C, T, V = x.size()
@@ -239,10 +267,12 @@ class ST_GCN(nn.Module):
         x = x.view(N, V, C, T).permute(0, 2, 3, 1).contiguous()
         
         # STGC blocks
-        x = self.stgc1(x, self.A)
-        x = self.stgc2(x, self.A)
-        x = self.stgc3(x, self.A)
-        x = self.stgc4(x, self.A)
+        for block in self.blocks:
+            x = block(x, self.A)
+        # x = self.stgc1(x, self.A)
+        # x = self.stgc2(x, self.A)
+        # x = self.stgc3(x, self.A)
+        # x = self.stgc4(x, self.A)
         
         # Global pooling + fc
         feat_4d = F.avg_pool2d(x, x.size()[2:])

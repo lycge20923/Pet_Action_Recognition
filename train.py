@@ -149,7 +149,7 @@ def prepare_dataloaders(data_params:DataArguments,
     if train_params.add_contrastive_loss:
         train_dataset = SiameseKpOfDataset(train_dataset, data_params)
     
-    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_coords_file_name)
+    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
     if not os.path.exists(coord_path):
         sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
         if isinstance(sample, torch.Tensor):
@@ -204,23 +204,29 @@ def build_model_and_optimizer(model_params:ModelArguments,
     model = model.to(train_params.device)
     
     # set optimizer and scheduler
-    if not (train_params.use_multiplie_learning_rates and model_params.add_optical_flow and (not model_params.only_optical_flow)):
-        optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    else:
-        stgcn_params = list(base_model.skel_model.parameters())
-        i3d_params = list(base_model.I3D.parameters())
-        stgcn_set = set(stgcn_params)
-        i3d_set = set(i3d_params)
-
-        # calculate for fuse head
+    optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
+    if train_params.use_multiplie_learning_rates and (not model_params.only_optical_flow): 
         all_params = set(model.parameters())
-        fuse_head_params = list(all_params - stgcn_set - i3d_set)
-        
-        optimizer = torch.optim.SGD([
-        {'params': stgcn_params, 'lr': train_params.branch_stgcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
-        {'params': i3d_params, 'lr': train_params.branch_I3D_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # I3D branch
-        {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay},         # fuse head branch
-        ], momentum=train_params.momentum)
+        stgcn_params = list(base_model.skel_model.parameters())
+        stgcn_set = set(stgcn_params)
+        if model_params.add_optical_flow:
+            i3d_params = list(base_model.I3D.parameters())
+            i3d_set = set(i3d_params)
+
+            # calculate for fuse head
+            fuse_head_params = list(all_params - stgcn_set - i3d_set)
+            
+            optimizer = torch.optim.SGD([
+            {'params': stgcn_params, 'lr': train_params.branch_stgcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
+            {'params': i3d_params, 'lr': train_params.branch_I3D_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # I3D branch
+            {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay},         # fuse head branch
+            ], momentum=train_params.momentum)
+        else:
+            fuse_head_params = list(all_params - stgcn_set)
+            optimizer = torch.optim.SGD([
+            {'params': stgcn_params, 'lr': train_params.branch_stgcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
+            {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # others
+            ], momentum=train_params.momentum)
     
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=train_params.scheduler_eta_min)
     
@@ -253,7 +259,6 @@ def train_one_epoch(model,
         optimizer.zero_grad()
         
         batch_loss_total = None
-        batch_loss_ce_val = 0.0 
         
         if train_params.add_contrastive_loss and contrastive_loss: 
             (kp1, kp2), (flow1, flow2), (lab1, lab2), y = batch_data
@@ -267,11 +272,12 @@ def train_one_epoch(model,
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
             loss_ce_part2 = cross_entropy_loss(logit2, lab2)
-            batch_loss_ce_tensor = loss_ce_part1 + loss_ce_part2 
-            batch_loss_ce_val = batch_loss_ce_tensor.item() 
-
-            batch_loss_cl = contrastive_loss(emb1, emb2, y)
-            batch_loss_total = batch_loss_ce_tensor + train_params.contrastive_loss_coefficient * batch_loss_cl 
+            batch_loss_ce = loss_ce_part1 + loss_ce_part2 
+            
+            batch_loss_cl = contrastive_loss(emb1, emb2, y) * train_params.contrastive_loss_coefficient
+            wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
+            
+            batch_loss_total = batch_loss_ce + batch_loss_cl 
             
             batch_loss_total.backward()
             optimizer.step()
@@ -291,20 +297,21 @@ def train_one_epoch(model,
             
             _, output = model(kps, flow)
 
-            batch_loss_ce_tensor = cross_entropy_loss(output, label) 
-            batch_loss_ce_val = batch_loss_ce_tensor.item() 
+            batch_loss_ce = cross_entropy_loss(output, label)
+            batch_loss_total = batch_loss_ce
             
-            batch_loss_ce_tensor.backward() 
+            batch_loss_total.backward() 
             optimizer.step()
 
             current_batch_size = label.size(0)
             total_individual_samples += current_batch_size 
-            sum_loss += batch_loss_ce_val * current_batch_size 
+            sum_loss += batch_loss_total.item() * current_batch_size 
             _, predict = torch.max(output.data, 1)
             correct += (predict == label).sum().item()
-            batch_loss_total = batch_loss_ce_tensor 
         
-        wandb.log({"train_batch_loss_total": batch_loss_total.item(), "train_batch_loss_ce": batch_loss_ce_val})
+        wandb.log({"train_batch_loss_total": batch_loss_total.item(), 
+                   "train_batch_loss_ce": batch_loss_ce.item()})
+        
         
     epoch_loss = sum_loss / len(loader.dataset) 
     epoch_acc = correct / total_individual_samples
@@ -453,18 +460,18 @@ def main():
             best_val_acc = val_acc
             if train_params.add_contrastive_loss:
                 weights_to_save = model.backbone.state_dict()
-                if train_params.save_stgcn_weights:
+                if train_params.save_gcn_weights:
                     torch.save(
                         model.backbone.skel_model.state_dict(),
-                        os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_weights_file_name)
+                        os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
                     )
                 print("Info: Saving backbone (ActionRecognitionModel) state_dict from ContrastiveActionWrapper.")
             else:
                 weights_to_save = model.state_dict()
-                if train_params.save_stgcn_weights:
+                if train_params.save_gcn_weights:
                     torch.save(
                         model.skel_model.state_dict(),
-                        os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_weights_file_name)
+                        os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
                     )
                 print("Info: Saving ActionRecognitionModel state_dict.")
             torch.save({

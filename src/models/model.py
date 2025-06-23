@@ -2,8 +2,11 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Normal
 
 from .stgcn import ST_GCN
+from .tdgcn import TD_GCN
+from .degcn import DE_GCN
 from .I3D import InceptionI3d
 from ..utils.cli_args import ModelArguments, DataArguments
 
@@ -18,8 +21,16 @@ class ActionRecognitionModel(nn.Module):
         
         # initiate model
         if not self.only_optical_flow: # at least we use skeleton information 
-            self.skel_model = ST_GCN(model_params=model_params, data_params=data_params, coords=coords)
-            self._skel_feat_dim = self.skel_model.fc.in_channels
+            if model_params.gcn_model_name == "tdgcn":
+                self.skel_model = TD_GCN(model_params=model_params, data_params=data_params)
+                self._skel_feat_dim = self.skel_model.fc.in_features
+            elif model_params.gcn_model_name == "stgcn":
+                self.skel_model = ST_GCN(model_params=model_params, data_params=data_params, coords=coords)
+                self._skel_feat_dim = self.skel_model.fc.in_channels
+            elif model_params.gcn_model_name == "degcn":
+                self.skel_model = DE_GCN(model_params=model_params, data_params=data_params)
+                self._skel_feat_dim = self.skel_model.fc[0].in_features
+        
         else: # skip skeleton information
             self.skel_model = None
             self._skel_feat_dim = 0
@@ -41,8 +52,8 @@ class ActionRecognitionModel(nn.Module):
             self.flow_feature_projector = nn.Linear(self._flow_feat_dim, self._projected_flow_feat_dim)
 
         # for using both skeleton and optical flow, we should load the pretrained weights of ST-GCN
-        if self.use_optical_flow and not self.only_optical_flow:
-            st_gcn_weights_path = os.path.join(model_params.pretrained_weight_dir, model_params.stgcn_weights_dir_name, model_params.stgcn_weights_file_name)
+        if (model_params.load_gcn_weights or self.use_optical_flow) and not self.only_optical_flow:
+            st_gcn_weights_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
             self.skel_model.load_state_dict(torch.load(st_gcn_weights_path))            
             
         
@@ -89,15 +100,15 @@ class ContrastiveActionWrapper(nn.Module):
 
 if __name__ == "__main__":
     import numpy as np 
-    model_args, data_args = ModelArguments(), DataArguments()
-    coords = np.load(os.path.join(model_args.pretrained_weight_dir, model_args.stgcn_weights_dir_name, model_args.stgcn_coords_file_name))
-    act_model = ActionRecognitionModel(model_args, data_args, coords)
+    model_params, data_params = ModelArguments(), DataArguments()
+    coords = np.load(os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name))
+    act_model = ActionRecognitionModel(model_params, data_params, coords)
     act_model.eval()
 
     # --- begin test for I3D.extract_features output shape ---
     # Create a dummy flow tensor of shape (batch, channels=2, frames, H, W)
     # You can substitute data_args.num_samples and your actual spatial size
-    B, C, T = 1, 2, data_args.num_samples
+    B, C, T = 1, 2, data_params.num_samples
     H, W = 224, 224  # or whatever your flow input size is
     dummy_flow = torch.randn(B, C, T, H, W)
 
