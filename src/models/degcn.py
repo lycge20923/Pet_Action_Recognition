@@ -19,8 +19,74 @@ def init_param(modules):
         elif isinstance(m, nn.BatchNorm1d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d):
             nn.init.constant_(m.weight, 1)
             nn.init.constant_(m.bias, 0)
-            
-            
+        
+class FlowAdjacency(nn.Module):
+    def __init__(self, num_nodes, patch_size=5, hidden_dim=16):
+        super().__init__()
+        self.V = num_nodes
+        self.ps = patch_size
+        self.pad = patch_size // 2
+        self.mlp = nn.Sequential(
+            nn.Linear(8, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, flow_seq, keypoints):
+        # flow_seq: (N,T,2,H,W), keypoints: (N,T,V,3)
+        flow_seq = flow_seq.permute(0, 2, 1, 3, 4) # B, 2, T, H, W => B, T, 2, H, W
+        keypoints = keypoints.permute(0, 2, 3, 1) # B, C, T, V => B, T, V, C
+        
+        N, T, _, H, W = flow_seq.shape
+        V = self.V
+        ps, pad = self.ps, self.pad
+
+        # 1) calculate coordinate of keypoints
+        coords = keypoints[..., :2].clamp(0, 1)
+        px = (coords[...,0] * (W-1)).long()  # (N,T,V)
+        py = (coords[...,1] * (H-1)).long()  # (N,T,V)
+
+        # 2) Flatten batch & time dim, and conduct unfold
+        NT = N * T
+        flow_flat = flow_seq.reshape(NT, 2, H, W)  # (NT,2,H,W)
+        patches_all = F.unfold(
+            flow_flat,
+            kernel_size=(ps, ps),
+            padding=pad
+        )  # → (NT, 2*ps*ps, H*W)
+
+        # 3) extract every patch of the keypoints
+        P  = ps * ps
+        HW = H * W
+        idx = (py * W + px).view(NT, V)            # (NT,V)
+        idx = idx.unsqueeze(1).expand(NT, 2*P, V)  # (NT,2P,V)
+        patches = patches_all.gather(2, idx)       # (NT,2P,V)
+
+        # 4) seperate u/v two channels，and calculate μ, σ
+        patch_u = patches[:, :P, :]                # (NT, P, V)
+        patch_v = patches[:, P:, :]                # (NT, P, V)
+
+        mu_u    = patch_u.mean(dim=1)              # (NT, V)
+        sigma_u = patch_u.std(dim=1, unbiased=False)  # (NT, V)
+        mu_v    = patch_v.mean(dim=1)              # (NT, V)
+        sigma_v = patch_v.std(dim=1, unbiased=False)  # (NT, V)
+
+        # 5) concatenate feature
+        feats = torch.stack([mu_u, mu_v, sigma_u, sigma_v], dim=2)  # (NT, V, 4)
+
+        # 6) construct pairwise features (NT, V, V, 8)
+        Fi = feats.unsqueeze(2).expand(NT, V, V, 4)
+        Fj = feats.unsqueeze(1).expand(NT, V, V, 4)
+        pairs = torch.cat([Fi, Fj], dim=3)  # (NT, V, V, 8)
+
+        # 7) MLP
+        scores = self.mlp(pairs.view(-1, 8)).view(NT, V, V)
+        # 8) reverse to (N, V, V)
+        A_flow = scores.view(N, T, V, V).mean(dim=1)  # (N, V, V)
+
+        return A_flow
+
+
 class TemporalConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1):
         super(TemporalConv, self).__init__()
@@ -107,7 +173,8 @@ class ST_GC(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels * self.Nh, 1)
         self.bn = nn.BatchNorm2d(out_channels)
 
-    def forward(self, x):
+    # def forward(self, x):
+    def forward(self, x, keypoints=None, flow_map=None):
         N, C, T, V = x.size()
         v = self.conv(x).view(N, self.Nh, -1, T, V)
         weights = self.A.to(v.dtype)
@@ -118,7 +185,7 @@ class ST_GC(nn.Module):
     
 
 class CTR_GC(nn.Module):
-    def __init__(self, in_channels, out_channels, A, num_scale=1):
+    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17):
         super(CTR_GC, self).__init__()
 
         A = torch.from_numpy(A.astype(np.float32))
@@ -138,13 +205,32 @@ class CTR_GC(nn.Module):
     
         self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
+        
+        self.flow_adj = FlowAdjacency(num_nodes=num_nodes,
+                                      patch_size=5,
+                                      hidden_dim=16)
 
-    def forward(self, x, A=None, alpha=1):
+    # def forward(self, x, A=None, alpha=1):
+    def forward(self, x, keypoints=None, flow_seq=None, alpha=1.0, beta=1.0):
         N, C, T, V = x.size()
         res = x
         q, k, v = self.conv1(x).mean(-2), self.conv2(x).mean(-2), self.conv3(x).view(N, self.num_scale, self.Nh, -1, T, V)
         weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)        
-        weights = weights * self.alpha.to(weights.dtype) + self.A.view(1, 1, self.Nh, 1, V, V).to(weights.dtype)
+        
+        # weights = weights * self.alpha.to(weights.dtype) + self.A.view(1, 1, self.Nh, 1, V, V).to(weights.dtype)
+        if (keypoints is not None) and (flow_seq is not None):
+            A_flow = self.flow_adj(flow_seq, keypoints)  # (V, V
+            Af = A_flow.unsqueeze(1).expand(-1, self.Nh, -1, -1) 
+            dtype, device = weights.dtype, weights.device
+            A_dyn = (beta * Af).unsqueeze(1).unsqueeze(3)
+            A_dyn = A_dyn.to(weights.dtype).to(weights.device)
+        else:
+            A_dyn = 0
+        dtype = weights.dtype
+        device = weights.device
+        A_static = (alpha * self.A).view(1,1,self.Nh,1,V,V).to(dtype).to(device)
+        weights = weights * self.alpha.to(dtype) + A_static + A_dyn
+            
         x = torch.einsum('ngacvu, ngactu->ngctv', weights, v).contiguous().view(N, -1, T, V)
         x = self.bn(x)
         return x
@@ -343,10 +429,11 @@ class Basic_Block(nn.Module):
         
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         init_param(self.modules())
-        
-    def forward(self, x):
+    
+    # def forward(self, x):
+    def forward(self, x, keypoints=None, flow_map=None):
         res = x
-        x = self.gcn(x)
+        x = self.gcn(x, keypoints, flow_map)
         x = self.relu(x + self.residual1(res))
         x = self.tcn(x)
         x = self.relu(x + self.residual2(res))
@@ -357,24 +444,25 @@ def bn_init(bn, scale):
     nn.init.constant_(bn.weight, scale)
     nn.init.constant_(bn.bias, 0)
 
-class DeGCN(nn.Sequential):
+class DeGCN(nn.Module):
     def __init__(self, block_args, A, k, eta):
-        super(DeGCN, self).__init__()
-        for i, [in_channels, out_channels, stride, residual, num_frame, num_joint] in enumerate(block_args):
-            self.add_module(
-                f'block-{i}_tcngcn',
-                Basic_Block(
-                    in_channels,
-                    out_channels,
-                    A,
-                    k,
-                    eta,
-                    stride=stride,
-                    num_frame=num_frame,
-                    num_joint=num_joint,
-                    residual=residual
-                )
+        super().__init__()
+        self.blocks = nn.ModuleList([
+            Basic_Block(
+                in_ch, out_ch, A, k, eta,
+                stride=stride,
+                num_frame=num_frame,
+                num_joint=num_joint,
+                residual=residual
             )
+            for in_ch, out_ch, stride, residual, num_frame, num_joint in block_args
+        ])
+
+    def forward(self, x, keypoints=None, flow_seq=None):
+        # x: (N*M, C, T, V)
+        for block in self.blocks:
+            x = block(x, keypoints, flow_seq)
+        return x
 
 class DE_GCN(nn.Module):
     def __init__(
@@ -415,7 +503,9 @@ class DE_GCN(nn.Module):
         else:
             self.drop_out = lambda x: x
 
-    def forward(self, x):
+    # def forward(self, x):
+    def forward(self, x, flow_map=None):
+        keypoints = x.detach().clone()
         # Input reshape and batchnorm
         if x.dim() == 3:
             N, T, VC = x.shape
@@ -431,7 +521,10 @@ class DE_GCN(nn.Module):
         # Multi-stream processing and pooling
         feats, logits_list = [], []
         for stream, fc in zip(self.streams, self.fc):
-            x_s = stream(x_)                   # (N*M, C', T', V')
+            if flow_map is not None:
+                x_s = stream(x_, keypoints, flow_map) 
+            else:
+                x_s = stream(x_) # (N*M, C', T', V')
             c_new = x_s.size(1)
             # Pool over time & joints
             x_pooled = x_s.view(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')

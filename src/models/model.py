@@ -16,11 +16,11 @@ class ActionRecognitionModel(nn.Module):
                  data_params:DataArguments,
                  coords):
         super().__init__()
-        self.only_optical_flow = model_params.only_optical_flow
-        self.use_optical_flow = model_params.add_optical_flow
+        self.only_I3D_branch = model_params.only_I3D_branch
+        self.add_I3D_branch = model_params.add_I3D_branch
         
         # initiate model
-        if not self.only_optical_flow: # at least we use skeleton information 
+        if not self.only_I3D_branch: # at least we use skeleton information 
             if model_params.gcn_model_name == "tdgcn":
                 self.skel_model = TD_GCN(model_params=model_params, data_params=data_params)
                 self._skel_feat_dim = self.skel_model.fc.in_features
@@ -39,7 +39,7 @@ class ActionRecognitionModel(nn.Module):
         self._flow_feat_dim = 0
         self._projected_flow_feat_dim = 0
         
-        if self.use_optical_flow or self.only_optical_flow:
+        if self.add_I3D_branch or self.only_I3D_branch:
             self.I3D = InceptionI3d(in_channels=2)
             
             # load weight 
@@ -52,21 +52,21 @@ class ActionRecognitionModel(nn.Module):
             self.flow_feature_projector = nn.Linear(self._flow_feat_dim, self._projected_flow_feat_dim)
 
         # for using both skeleton and optical flow, we should load the pretrained weights of ST-GCN
-        if (model_params.load_gcn_weights or self.use_optical_flow) and not self.only_optical_flow:
+        if (model_params.load_gcn_weights or self.add_I3D_branch) and not self.only_I3D_branch:
             st_gcn_weights_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
             self.skel_model.load_state_dict(torch.load(st_gcn_weights_path))            
             
         
         # concate feature's size, for final classifier
         self.total_feature_dimension = self._skel_feat_dim
-        if (self.use_optical_flow or self.only_optical_flow) and self.I3D is not None:
+        if (self.add_I3D_branch or self.only_I3D_branch) and self.I3D is not None:
             self.total_feature_dimension += self._projected_flow_feat_dim
         self.final_classifier = nn.Linear(self.total_feature_dimension, model_params.num_classes)
     
         
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
         # 1. only optical flow
-        if self.only_optical_flow:
+        if self.only_I3D_branch:
             flow_map = self.I3D.extract_features(flow)
             flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
             projected_flow_feat = self.flow_feature_projector(flow_feat)
@@ -75,9 +75,9 @@ class ActionRecognitionModel(nn.Module):
             return combined_feat, main_task_logits
         
         # 2. at least use skeleton information
-        skel_feat, _ = self.skel_model(skeleton)
+        skel_feat, _ = self.skel_model(skeleton, flow)
         combined_feat = skel_feat
-        if self.use_optical_flow and self.I3D is not None and flow is not None:
+        if self.add_I3D_branch and self.I3D is not None and flow is not None:
             flow_map = self.I3D.extract_features(flow)
             flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
             projected_flow_feat = self.flow_feature_projector(flow_feat)

@@ -92,7 +92,7 @@ This project aims to recognize and classify various actions performed by pets (i
         ```
         ...
         parameters:
-          add_optical_flow: # this is the parameters you want to change
+          batch_size: # this is the parameters you want to change
             values: [False] # or you could specifiy multiple values like [True, False]
         ```
 

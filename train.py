@@ -205,11 +205,11 @@ def build_model_and_optimizer(model_params:ModelArguments,
     
     # set optimizer and scheduler
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    if train_params.use_multiplie_learning_rates and (not model_params.only_optical_flow): 
+    if train_params.use_multiplie_learning_rates and (not model_params.only_I3D_branch): 
         all_params = set(model.parameters())
         stgcn_params = list(base_model.skel_model.parameters())
         stgcn_set = set(stgcn_params)
-        if model_params.add_optical_flow:
+        if model_params.add_I3D_branch:
             i3d_params = list(base_model.I3D.parameters())
             i3d_set = set(i3d_params)
 

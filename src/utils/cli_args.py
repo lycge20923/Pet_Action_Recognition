@@ -198,10 +198,10 @@ class ModelArguments:
         default=128, 
         metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
     )
-    add_optical_flow: bool = field(
-        default=True,
-        metadata={"help":"Whether adding optical flow"}
-    )
+    # add_optical_flow: bool = field(
+    #     default=True,
+    #     metadata={"help":"Whether adding optical flow"}
+    # )
     pretrained_weight_dir: str = field(
         default="models",
         metadata={"help":"Root directory to store pretrained weights"}
@@ -232,6 +232,11 @@ class ModelArguments:
         default=2, 
         metadata= {"help": "The number of streams used in DE-GCN"}
     )
+    # possible parameter for ablation study
+    degcn_add_of_A: bool = field(
+        default=False,
+        metadata={"help":"Whether add A(from optical flow) in the architecture in DE-GCN"}
+    )
     
     load_gcn_weights: bool = field(
         default=False, 
@@ -240,6 +245,14 @@ class ModelArguments:
     stgcn_coords_file_name: str = field(
         default="coords_stgcn.npy",
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
+    )
+    add_I3D_branch: bool = field(
+        default=True,
+        metadata={"help":"Whether add parallel I3D branch in the model for the prediction"}
+    )
+    only_I3D_branch: bool = field(
+        default=False,
+        metadata={"help":"Whether only use I3D branch(exclude GCN branch) in the model for the prediction"}
     )
     I3D_weights_dir_name: str = field(
         default="I3D",
@@ -257,10 +270,10 @@ class ModelArguments:
         default=128,
         metadata={"help":"Project to have the similar size with ST-GCN"}
     )
-    only_optical_flow: bool = field(
-        default=False, 
-        metadata={"help":"Only use optical flow and I3D to conduct action recognition"}
-    )
+    # only_optical_flow: bool = field(
+    #     default=False, 
+    #     metadata={"help":"Only use optical flow and I3D to conduct action recognition"}
+    # )
     
     
 @dataclass

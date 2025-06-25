@@ -20,8 +20,8 @@ class KpOfDataset(Dataset):
         self.data_params = data_params
         self.aug_params = aug_params
         self.model_params = model_params
-        self.add_optical_flow = model_params.add_optical_flow
-        self.only_optical_flow = model_params.only_optical_flow
+        self.kps_and_flow = model_params.add_I3D_branch or (model_params.gcn_model_name == "degcn" and model_params.degcn_add_of_A)
+        self.only_flow = model_params.only_I3D_branch
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -58,12 +58,12 @@ class KpOfDataset(Dataset):
         keypoints_tensor = None 
         
         # optical flows
-        if self.only_optical_flow or self.add_optical_flow:
+        if self.kps_and_flow:
             optical_flows_np = data["optical_flows"].astype(np.float32)
             optical_flows_np = optical_flows_np.squeeze(axis=1)
             optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3)
             optical_flows_tensor = torch.from_numpy(optical_flows_np).float()
-        if self.only_optical_flow:
+        if self.only_flow:
             return keypoints_tensor, optical_flows_tensor, label
         
         # keypoints
