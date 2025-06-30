@@ -7,7 +7,7 @@ import os
 import random
 import wandb
 import yaml
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
 import torch
 import torch.optim.lr_scheduler as lr_scheduler
@@ -363,9 +363,19 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
                 if corrects[i]:                    
                     class_correct[true_label] += 1 
 
+    cm = confusion_matrix(all_trues, all_preds, labels=list(range(num_classes))) # confusion matrix
+    
     epoch_acc = test_correct / len(loader.dataset)
     epoch_loss = test_loss / len(loader.dataset)
-    per_class_acc = class_correct / class_total.clamp(min=1)
+    
+    per_class_acc = []
+    for i in range(num_classes):
+        TP = cm[i, i]
+        FN = cm[i, :].sum() - TP
+        FP = cm[:, i].sum() - TP
+        TN = len(loader.dataset) - TP - FN - FP
+        per_class_acc.append((TP + TN) / len(loader.dataset))
+    per_class_acc = torch.tensor(per_class_acc).to(device)
     
     # for precision, recall, f1
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
@@ -403,7 +413,7 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
         tot_i = class_total[i].item()
         print(f"  Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
     
-    return epoch_loss, epoch_acc
+    return epoch_loss, epoch_acc, cm
 
 def main():
     # initial set
@@ -443,7 +453,7 @@ def main():
         train_loss, train_acc = train_one_epoch(model, train_loader, cross_entropy_loss, optimizer, epoch, train_params, contrastive_loss)
         print(f"Epoch {epoch+1} Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         
-        val_loss, val_acc = val_one_epoch(model, val_loader, cross_entropy_loss, epoch, actions=data_params.actions, train_params=train_params)
+        val_loss, val_acc, cm = val_one_epoch(model, val_loader, cross_entropy_loss, epoch, actions=data_params.actions, train_params=train_params)
         print(f"Epoch {epoch+1} Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
         # save for plottting
@@ -474,6 +484,8 @@ def main():
                         os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
                     )
                 print("Info: Saving ActionRecognitionModel state_dict.")
+                
+            # save model
             torch.save({
                 'epoch': epoch + 1,
                 'model_state_dict': weights_to_save,
@@ -483,6 +495,10 @@ def main():
                 'model_params': model_params, 
                 'dataset_params': data_params, 
             }, os.path.join(saving_dir, 'best.pth'))
+            
+            # save cofusion matrix
+            np.savetxt(os.path.join(saving_dir, "confusion_matrix.csv"), cm, fmt="%d", delimiter=',')
+            
             patient_count = 0
         wandb.log({"best_val_acc": best_val_acc})
         # early stopping 
