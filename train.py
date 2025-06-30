@@ -364,6 +364,7 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
                     class_correct[true_label] += 1 
 
     cm = confusion_matrix(all_trues, all_preds, labels=list(range(num_classes))) # confusion matrix
+    cm = cm.astype(np.float32) / cm.sum(axis=1, keepdims=True)
     
     epoch_acc = test_correct / len(loader.dataset)
     epoch_loss = test_loss / len(loader.dataset)
@@ -497,7 +498,7 @@ def main():
             }, os.path.join(saving_dir, 'best.pth'))
             
             # save cofusion matrix
-            np.savetxt(os.path.join(saving_dir, "confusion_matrix.csv"), cm, fmt="%d", delimiter=',')
+            np.savetxt(os.path.join(saving_dir, "confusion_matrix.csv"), cm, fmt="%.2f", delimiter=',')
             
             patient_count = 0
         wandb.log({"best_val_acc": best_val_acc})
