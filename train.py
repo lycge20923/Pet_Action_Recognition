@@ -369,14 +369,14 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
     epoch_acc = test_correct / len(loader.dataset)
     epoch_loss = test_loss / len(loader.dataset)
     
-    per_class_acc = []
-    for i in range(num_classes):
-        TP = cm[i, i]
-        FN = cm[i, :].sum() - TP
-        FP = cm[:, i].sum() - TP
-        TN = len(loader.dataset) - TP - FN - FP
-        per_class_acc.append((TP + TN) / len(loader.dataset))
-    per_class_acc = torch.tensor(per_class_acc).to(device)
+    # per_class_acc = []
+    # for i in range(num_classes):
+    #     TP = cm[i, i]
+    #     FN = cm[i, :].sum() - TP
+    #     FP = cm[:, i].sum() - TP
+    #     TN = len(loader.dataset) - TP - FN - FP
+    #     per_class_acc.append((TP + TN) / len(loader.dataset))
+    # per_class_acc = torch.tensor(per_class_acc).to(device)
     
     # for precision, recall, f1
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
@@ -395,7 +395,7 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
     log_dict = {"epoch":epoch, "val_loss": epoch_loss, "val_acc":epoch_acc, "val_prec":float(overall_prec), "val_rec":float(overall_rec), "val_f1":float(overall_f1)}
     for i in range(num_classes):
         action_name = actions[i]
-        log_dict[f"val_acc_class_{action_name}"] = per_class_acc[i].item()
+        # log_dict[f"val_acc_class_{action_name}"] = per_class_acc[i].item()
         log_dict[f"val_precision_class_{action_name}"] = float(per_class_prec[i])
         log_dict[f"val_recall_class_{action_name}"] = float(per_class_rec[i])
         log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
@@ -406,13 +406,14 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
     print("Per-class:")
     for i in range(num_classes):
         action_name = actions[i]
-        acc_i = per_class_acc[i].item()
+        # acc_i = per_class_acc[i].item()
         prec_i = per_class_prec[i]
         rec_i = per_class_rec[i]
         f1_i = per_class_f1[i]
         cor_i = class_correct[i].item()
         tot_i = class_total[i].item()
-        print(f"  Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
+        # print(f"  Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
+        print(f"  Class {actions[i]}, P {prec_i:.4f}, R {rec_i:.4f}({cor_i}/{tot_i}), F1 {f1_i:.4f}")
     
     return epoch_loss, epoch_acc, cm
 
