@@ -20,6 +20,7 @@ This project aims to recognize and classify various actions performed by pets (i
 
     ```
     conda install nvidia::cuda-toolkit=12.1 -y # for Mamba
+    pip install -U torch torchvision torchaudio # for Mamba
     pip install -r requirements.txt
     cd features/easy_ViTPose
     pip install -e .

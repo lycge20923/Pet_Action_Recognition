@@ -5,7 +5,7 @@ The parameters may be a bit messy, but please ensure the following:
 '''
 
 from dataclasses import dataclass, field
-from typing import Literal, List, Optional
+from typing import Literal, List, Optional, Tuple
 import torch
 
 DEFAULT_ACTIONS_LIST = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
@@ -321,6 +321,39 @@ class AugmentationArguments:
     valid_kpt_confidence_thresh: float = field(
         default=0.1, # Example threshold, adjust as needed
         metadata={"help": "Confidence threshold above which a keypoint is considered valid for geometric augmentations."}
+    )
+    # optical‐flow specific augmentations
+    flow_noise_std: float = field(
+        default=0.01,
+        metadata={"help": "Standard deviation for Gaussian noise added to optical flow."}
+    )
+    flow_scale_range: Tuple[float, float] = field(
+        default=(0.8, 1.2),
+        metadata={"help": "Range (min, max) for random scaling of optical flow magnitude."}
+    )
+    flow_hflip_prob: float = field(
+        default=0.5,
+        metadata={"help": "Probability of horizontally flipping the optical flow."}
+    )
+    flow_occl_ratio: float = field(
+        default=0.2,
+        metadata={"help": "Occlusion block size ratio (relative to H and W) for optical flow."}
+    )
+    flow_occl_prob: float = field(
+        default=0.3,
+        metadata={"help": "Probability of applying random occlusion to optical flow."}
+    )
+    flow_blur_ksize: int = field(
+        default=5,
+        metadata={"help": "Gaussian blur kernel size applied to optical flow."}
+    )
+    flow_blur_sigma: float = field(
+        default=1.0,
+        metadata={"help": "Sigma (standard deviation) for Gaussian blur on optical flow."}
+    )
+    flow_blur_prob: float = field(
+        default=0.3,
+        metadata={"help": "Probability of applying Gaussian blur to optical flow."}
     )
 
 @dataclass
