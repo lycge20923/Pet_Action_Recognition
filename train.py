@@ -347,7 +347,8 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
             loss = cross_entropy_loss(output, label)
             current_batch_size = label.size(0)
             total_samples += current_batch_size
-            test_loss += loss.item() * current_batch_size
+            if not torch.isnan(loss).any():
+                test_loss += loss.item() * current_batch_size
             _, predict = torch.max(output.data, 1)
             test_correct += (predict == label).sum().item()
             
