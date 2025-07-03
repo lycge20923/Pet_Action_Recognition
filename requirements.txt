@@ -12,3 +12,4 @@ git+https://github.com/abhiTronix/vidgear.git
 h5py
 huggingface_hub
 safetensors
+git+https://github.com/state-spaces/mamba.git
