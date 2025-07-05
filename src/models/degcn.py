@@ -21,16 +21,27 @@ def init_param(modules):
             nn.init.constant_(m.bias, 0)
         
 class FlowAdjacency(nn.Module):
-    def __init__(self, num_nodes, patch_size=5, hidden_dim=16):
+    # def __init__(self, num_nodes, patch_size=5, hidden_dim=16):
+    def __init__(self, num_nodes, patch_size=5, hidden_dims=[16]):
         super().__init__()
         self.V = num_nodes
         self.ps = patch_size
         self.pad = patch_size // 2
-        self.mlp = nn.Sequential(
-            nn.Linear(8, hidden_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, 1)
-        )
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(8, hidden_dim),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(hidden_dim, 1)
+        # )
+        
+        dims = [8] + hidden_dims + [1]
+        layers = []
+        for i in range(len(dims)-2):
+            layers += [
+                nn.Linear(dims[i], dims[i+1]),
+                nn.ReLU(inplace=True),
+            ]
+        layers.append(nn.Linear(dims[-2], dims[-1]))
+        self.mlp = nn.Sequential(*layers)
 
     def forward(self, flow_seq, keypoints):
         # flow_seq: (N,T,2,H,W), keypoints: (N,T,V,3)
@@ -73,6 +84,9 @@ class FlowAdjacency(nn.Module):
 
         # 5) concatenate feature
         feats = torch.stack([mu_u, mu_v, sigma_u, sigma_v], dim=2)  # (NT, V, 4)
+        
+        valid = (keypoints[..., 2].reshape(NT, V) > 0).to(feats.dtype)  # (NT, V)
+        feats = feats * valid.unsqueeze(-1)  
 
         # 6) construct pairwise features (NT, V, V, 8)
         Fi = feats.unsqueeze(2).expand(NT, V, V, 4)
@@ -206,9 +220,10 @@ class CTR_GC(nn.Module):
         self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         
-        self.flow_adj = FlowAdjacency(num_nodes=num_nodes,
-                                      patch_size=5,
-                                      hidden_dim=16)
+        # self.flow_adj = FlowAdjacency(num_nodes=num_nodes,
+        #                               patch_size=5,
+        #                               hidden_dim=16)
+        self.flow_adj = FlowAdjacency(num_nodes=num_nodes, patch_size=5, hidden_dims=[16, 32, 16])
 
     # def forward(self, x, A=None, alpha=1):
     def forward(self, x, keypoints=None, flow_seq=None, alpha=1.0, beta=1.0):
@@ -384,7 +399,6 @@ class MultiScale_TemporalModeling(nn.Module):
         x = torch.cat([self.tcn1(x), self.tcn2(x), self.maxpool3x1(x), self.conv1x1(x)], 1)
         return x
     
-    
 class Basic_Block(nn.Module):
     def __init__(self, in_channels, out_channels, A, k, eta, kernel_size=5, stride=1, dilations=2, 
                  num_frame=64, num_joint=25, residual=True):
@@ -539,4 +553,6 @@ class DE_GCN(nn.Module):
         return feat, logits
 
 if __name__ == "__main__":
-    model = DE_GCN()
+    pass
+    # model = MambaBlock(d_model=4)
+    # print(model)
