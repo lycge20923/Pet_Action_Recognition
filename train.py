@@ -239,7 +239,9 @@ def set_seed(seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark   = False
+    
 def train_one_epoch(model, 
                     loader, 
                     cross_entropy_loss, 

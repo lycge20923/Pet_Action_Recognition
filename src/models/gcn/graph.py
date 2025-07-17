@@ -2,13 +2,12 @@ import sys
 import numpy as np
 
 from .tools import *
-from ..utils.cli_args import ModelArguments, DataArguments
 
 class Graph:
-    def __init__(self, model_params:ModelArguments, data_params:DataArguments, labeling_mode='spatial'):
-        self.num_node = data_params.num_nodes
+    def __init__(self, num_nodes:int, neighbor_base:list, labeling_mode='spatial'):
+        self.num_node = num_nodes
         self.self_link = [(i, i) for i in range(self.num_node)]
-        inward_ori_index = model_params.neighbor_base
+        inward_ori_index = neighbor_base
         self.inward = [(i - 1, j - 1) for (i, j) in inward_ori_index]
         self.outward = [(j, i) for (i, j) in self.inward]
         self.neighbor = self.inward + self.outward

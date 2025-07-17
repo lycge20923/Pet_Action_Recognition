@@ -237,6 +237,11 @@ class ModelArguments:
         default=False,
         metadata={"help":"Whether add A(from optical flow) in the architecture in DE-GCN"}
     )
+    # possible parameter for ablation study
+    degcn_add_node_attention: bool = field(
+        default=False, 
+        metadata={"help":"Whether use node attention class in degcn"}
+    )
     
     load_gcn_weights: bool = field(
         default=False, 

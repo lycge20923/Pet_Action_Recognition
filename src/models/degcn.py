@@ -5,8 +5,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .tools import *
-from .graph import Graph
+from .gcn.tools import *
+from .gcn.graph import Graph
+from .gcn.new_modules import FlowAdjacency, NodeAttention
 from ..utils.cli_args import ModelArguments, DataArguments
 
 LEAKY_ALPHA = 0.1
@@ -19,107 +20,6 @@ def init_param(modules):
         elif isinstance(m, nn.BatchNorm1d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d):
             nn.init.constant_(m.weight, 1)
             nn.init.constant_(m.bias, 0)
-        
-class FlowAdjacency(nn.Module):
-    # def __init__(self, num_nodes, patch_size=5, hidden_dim=16):
-    def __init__(self, num_nodes, patch_size=5, hidden_dims=[16]):
-        super().__init__()
-        self.V = num_nodes
-        self.ps = patch_size
-        self.pad = patch_size // 2
-        # self.mlp = nn.Sequential(
-        #     nn.Linear(8, hidden_dim),
-        #     nn.ReLU(inplace=True),
-        #     nn.Linear(hidden_dim, 1)
-        # )
-        
-        dims = [8] + hidden_dims + [1]
-        layers = []
-        for i in range(len(dims)-2):
-            layers += [
-                nn.Linear(dims[i], dims[i+1]),
-                nn.ReLU(inplace=True),
-            ]
-        layers.append(nn.Linear(dims[-2], dims[-1]))
-        self.mlp = nn.Sequential(*layers)
-
-    def forward(self, flow_seq, keypoints):
-        # flow_seq: (N,T,2,H,W), keypoints: (N,T,V,3)
-        flow_seq = flow_seq.permute(0, 2, 1, 3, 4) # B, 2, T, H, W => B, T, 2, H, W
-        keypoints = keypoints.permute(0, 2, 3, 1) # B, C, T, V => B, T, V, C
-        
-        N, T, _, H, W = flow_seq.shape
-        V = self.V
-        ps, pad = self.ps, self.pad
-
-        # 1) calculate coordinate of keypoints
-        coords = keypoints[..., :2].clamp(0, 1)
-        px = (coords[...,0] * (W-1)).long()  # (N,T,V)
-        py = (coords[...,1] * (H-1)).long()  # (N,T,V)
-
-        # 2) Flatten batch & time dim, and conduct unfold
-        NT = N * T
-        flow_flat = flow_seq.reshape(NT, 2, H, W)  # (NT,2,H,W)
-        patches_all = F.unfold(
-            flow_flat,
-            kernel_size=(ps, ps),
-            padding=pad
-        )  # → (NT, 2*ps*ps, H*W)
-
-        # 3) extract every patch of the keypoints
-        P  = ps * ps
-        HW = H * W
-        idx = (py * W + px).view(NT, V)            # (NT,V)
-        idx = idx.unsqueeze(1).expand(NT, 2*P, V)  # (NT,2P,V)
-        patches = patches_all.gather(2, idx)       # (NT,2P,V)
-
-        # 4) seperate u/v two channels，and calculate μ, σ
-        patch_u = patches[:, :P, :]                # (NT, P, V)
-        patch_v = patches[:, P:, :]                # (NT, P, V)
-
-        mu_u    = patch_u.mean(dim=1)              # (NT, V)
-        sigma_u = patch_u.std(dim=1, unbiased=False)  # (NT, V)
-        mu_v    = patch_v.mean(dim=1)              # (NT, V)
-        sigma_v = patch_v.std(dim=1, unbiased=False)  # (NT, V)
-
-        # 5) concatenate feature
-        feats = torch.stack([mu_u, mu_v, sigma_u, sigma_v], dim=2)  # (NT, V, 4)
-        
-        valid = (keypoints[..., 2].reshape(NT, V) > 0).to(feats.dtype)  # (NT, V)
-        feats = feats * valid.unsqueeze(-1)  
-
-        # 6) construct pairwise features (NT, V, V, 8)
-        Fi = feats.unsqueeze(2).expand(NT, V, V, 4)
-        Fj = feats.unsqueeze(1).expand(NT, V, V, 4)
-        pairs = torch.cat([Fi, Fj], dim=3)  # (NT, V, V, 8)
-
-        # 7) MLP
-        scores = self.mlp(pairs.view(-1, 8)).view(NT, V, V)
-        # 8) reverse to (N, V, V)
-        A_flow = scores.view(N, T, V, V).mean(dim=1)  # (N, V, V)
-
-        return A_flow
-
-
-class TemporalConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1, groups=1):
-        super(TemporalConv, self).__init__()
-        
-        pad = (kernel_size + (kernel_size-1) * (dilation-1) - 1) // 2
-        self.conv = nn.Conv2d(in_channels, 
-                              out_channels, 
-                              kernel_size=(kernel_size, 1),
-                              padding=(pad, 0), 
-                              stride=(stride, 1), 
-                              dilation=(dilation, 1), 
-                              groups=groups)
-        self.bn = nn.BatchNorm2d(out_channels)
-
-    def forward(self, x):
-        x = self.bn(self.conv(x))
-        return x
-    
-    
 class PointWiseTCN(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1, groups=1):
         super(PointWiseTCN, self).__init__()
@@ -130,76 +30,41 @@ class PointWiseTCN(nn.Module):
         x = self.bn(self.conv(x))
         return x
     
-    
-class UnfoldTemporalWindows(nn.Module):
-    def __init__(self, window_size, window_stride, window_dilation=1, pad=True):
-        super().__init__()
-        
-        self.window_size = window_size
-        self.padding = (window_size + (window_size-1) * (window_dilation-1) - 1) // 2 if pad else 0
-        
-        self.unfold = nn.Unfold(kernel_size=(self.window_size, 1),
-                                dilation=(self.window_dilation, 1),
-                                stride=(self.window_stride, 1),
-                                padding=(self.padding, 0))
-
-    def forward(self, x):
-        N, C, T, V = x.shape
-        x = self.unfold(x)
-        x = x.view(N, C, self.window_size, -1, V)
-        x = x.transpose(2, 3).contiguous()
-        return x
-    
-    
-class PositionalEncoding(nn.Module):
-    def __init__(self, channel, joint_num, time_len):
-        super(PositionalEncoding, self).__init__()
-        self.joint_num = joint_num
-        self.time_len = time_len
-
-        pos_list = []
-        for t in range(self.time_len):
-            for j_id in range(self.joint_num):
-                pos_list.append(j_id)
-        position = torch.from_numpy(np.array(pos_list)).unsqueeze(1).float()
-
-        pe = torch.zeros(self.time_len * self.joint_num, channel)
-        div_term = torch.exp(torch.arange(0, channel, 2).float() *
-                             -(math.log(10000.0) / channel))  # channel//2
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.view(time_len, joint_num, channel).permute(2, 0, 1).unsqueeze(0)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):  # nctv
-        x = x + self.pe.to(x.dtype)[:, :, :x.size(2)]
-        return x   
-    
-    
 class ST_GC(nn.Module):
-    def __init__(self, in_channels, out_channels, A):
+    def __init__(self, in_channels, out_channels, A): # 3, 64, (3, 17, 17)
         super(ST_GC, self).__init__()
         
         A = torch.from_numpy(A.astype(np.float32))
-        self.A = nn.Parameter(A)
-        self.Nh = A.size(0)
+        self.A = nn.Parameter(A) # make sure the it could be updated
+        self.Nh = A.size(0) # number of heads, 3
         
-        self.conv = nn.Conv2d(in_channels, out_channels * self.Nh, 1)
+        '''
+        Input: (N, input_channles, T, V)
+        Output: (N, output_channels*Nf, T, V)
+        '''
+        self.conv = nn.Conv2d(in_channels, out_channels * self.Nh, 1) 
         self.bn = nn.BatchNorm2d(out_channels)
 
     # def forward(self, x):
     def forward(self, x, keypoints=None, flow_map=None):
-        N, C, T, V = x.size()
-        v = self.conv(x).view(N, self.Nh, -1, T, V)
+        N, C, T, V = x.size() # 32, 3, 32, 17
+        v = self.conv(x).view(N, self.Nh, -1, T, V) # N, out_channels*Nf, T, 17 -> N, Nf, output_channels, T, V) 
         weights = self.A.to(v.dtype)
         
-        x = torch.einsum('hvu,nhctu->nctv', weights, v)
-        x = self.bn(x)
+        '''
+        h: 3, v, u:17
+        n: N, h:hf, c:output_channels=64, t: 32, u: 17
+        function: 
+            1. for each head(total 3), weights[h], times and sum v[:, h, :, :, :] 
+            2. Sum all results in the dimension of head, and delete h, u
+        '''
+        x = torch.einsum('hvu,nhctu->nctv', weights, v) # N, output_channels, T, V = 32, 64, 32, 17
+        x = self.bn(x) # same dim
         return x
     
 
 class CTR_GC(nn.Module):
-    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17):
+    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, flow_adj=False): # 64*a, 64*b, (3, 17, 17), 4, 17
         super(CTR_GC, self).__init__()
 
         A = torch.from_numpy(A.astype(np.float32))
@@ -207,7 +72,10 @@ class CTR_GC(nn.Module):
         self.A = nn.Parameter(A)
         self.num_scale = num_scale
         
-        rel_channels = in_channels // 8 if in_channels != 3 else 8
+        '''
+        in_channels would never be 3 since it only exists in first block 
+        '''
+        rel_channels = in_channels // 8 if in_channels != 3 else 8 # 64*a//8 
         
         self.conv1 = nn.Conv2d(in_channels, rel_channels * self.Nh, 1, groups=num_scale)
         self.conv2 = nn.Conv2d(in_channels, rel_channels * self.Nh, 1, groups=num_scale)
@@ -223,18 +91,31 @@ class CTR_GC(nn.Module):
         # self.flow_adj = FlowAdjacency(num_nodes=num_nodes,
         #                               patch_size=5,
         #                               hidden_dim=16)
-        self.flow_adj = FlowAdjacency(num_nodes=num_nodes, patch_size=5, hidden_dims=[16, 32, 16])
+        self.flow_adj = flow_adj
+        if self.flow_adj:
+            self.flow_adj = FlowAdjacency(num_nodes=num_nodes, patch_size=5, hidden_dims=[16, 32, 16])
 
     # def forward(self, x, A=None, alpha=1):
     def forward(self, x, keypoints=None, flow_seq=None, alpha=1.0, beta=1.0):
         N, C, T, V = x.size()
         res = x
-        q, k, v = self.conv1(x).mean(-2), self.conv2(x).mean(-2), self.conv3(x).view(N, self.num_scale, self.Nh, -1, T, V)
-        weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)        
+        
+        # q, k: (N, 64*a, T, V) => (N, (64*a//8)*nh, T, V) => (N, (64*a//8)*nh, V)
+        # v: (N, 64*b, T, V) => (N, 64*b*nh, T, V) => (N, 4, nh, 16*b, T, V)
+        q, k, v = self.conv1(x).mean(-2), self.conv2(x).mean(-2), self.conv3(x).view(N, self.num_scale, self.Nh, -1, T, V) 
+        
+        '''
+        Attention between Nodes,  q: (N, (64*a//8)*nh, V) -> (N, (64*a//8)*nh, V, 1), k: (N, (64*a//8)*nh, V) -> (N, (64*a//8)*nh, 1, V)
+        q - k: broacasting, q, k map to  (N, (64*a//8)*nh, V, V)
+        tanh: each element maps to (-1, 1)
+        weights: (N, ) -> (N, 4, nh, , V, V)
+        '''
+        weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)       
         
         # weights = weights * self.alpha.to(weights.dtype) + self.A.view(1, 1, self.Nh, 1, V, V).to(weights.dtype)
-        if (keypoints is not None) and (flow_seq is not None):
-            A_flow = self.flow_adj(flow_seq, keypoints)  # (V, V
+        if self.flow_adj and (keypoints is not None) and (flow_seq is not None):
+            A_flow = self.flow_adj(flow_seq, keypoints)  # (V, V)
+
             Af = A_flow.unsqueeze(1).expand(-1, self.Nh, -1, -1) 
             dtype, device = weights.dtype, weights.device
             A_dyn = (beta * Af).unsqueeze(1).unsqueeze(3)
@@ -250,73 +131,19 @@ class CTR_GC(nn.Module):
         x = self.bn(x)
         return x
     
-    
-class DeSGC(nn.Module):
-    '''
-    Note: This module is not included in the open-source release due to subsequent research and development. 
-    It will be made available in future updates after the completion of related studies.
-    '''
-    def __init__(self, in_channels, out_channels, A, k, num_scale=4, num_frame=64, num_joint=25):
-        super(DeSGC, self).__init__()
-
-        A = torch.from_numpy(A.astype(np.float32))
-        self.Nh = A.size(0)
-        self.A = nn.Parameter(A)
-        self.B = nn.Parameter(A)
-        
-        self.num_scale = num_scale
-        self.k = k
-        self.delta = 10
-        
-        rel_channels = in_channels // 8 if in_channels != 3 else 8
-        self.factor = rel_channels // num_scale
-        
-        self.pe = PositionalEncoding(in_channels, num_joint, num_frame)
-        self.conv = PointWiseTCN(in_channels, out_channels * self.Nh, 1, groups=num_scale)
-        self.convQK = nn.Conv2d(in_channels, 2 * rel_channels * self.Nh, 1, groups=num_scale)
-        self.convW = nn.Conv2d(rel_channels * self.Nh, out_channels * self.Nh, 1, groups=num_scale * self.Nh)
-
-        self.alpha = nn.Parameter(torch.zeros(1))
-        self.beta = nn.Parameter(torch.zeros(1, 1, self.Nh, 1, 1, 1))
-        self.bn = nn.BatchNorm2d(out_channels)
-    
-        self.tanh = nn.Tanh()
-        self.relu = nn.LeakyReLU(LEAKY_ALPHA)
-
-    def forward(self, x):
-        N, C, T, V = x.size()
-        res = x
-        v = self.relu(self.conv(x)).view(N, self.num_scale, self.Nh, -1, T, V)
-        dtype, device = v.dtype, v.device
-        
-        # calculate score
-        # ...
-        
-        # calculate weight
-        # ...
-        
-        # convert to onehot
-        # ...
-        
-        # sampling & aggregation
-        # ...
-        
-        return x
-    
-
 class DeTGC(nn.Module):
     def __init__(self, in_channels, out_channels, eta, kernel_size=1, stride=1, padding=0, dilation=1, 
                  num_scale=1, num_frame=64):
         super(DeTGC, self).__init__()
         
-        self.ks, self.stride, self.dilation = kernel_size, stride, dilation
-        self.T = num_frame
-        self.num_scale = num_scale
+        self.ks, self.stride, self.dilation = kernel_size, stride, dilation # 5, 1or2, 2or2
+        self.T = num_frame # 8
+        self.num_scale = num_scale # 4
         
-        self.eta = eta
+        self.eta = eta # 4
         ref = (self.ks + (self.ks-1) * (self.dilation-1) - 1) // 2
-        tr = torch.linspace(-ref, ref, self.eta)
-        self.tr = nn.Parameter(tr)
+        tr = torch.linspace(-ref, ref, self.eta) # sampling from -ref to ref, total eta points
+        self.tr = nn.Parameter(tr) # make it trainable
 
         self.conv_out = nn.Sequential(
             nn.Conv3d(in_channels, out_channels, kernel_size=(self.eta, 1, 1)),
@@ -325,26 +152,30 @@ class DeTGC(nn.Module):
 
     def forward(self, x):
         res = x
+        '''
+        C: 16, 32, 64
+        T: 32, 32, 16or8
+        '''
         N, C, T, V = x.size()
         Tout = T // self.stride
         dtype = x.dtype 
         
         #learnable sampling locations
-        t0 = torch.arange(0, T, self.stride, dtype=dtype, device=x.device)
-        tr = self.tr.to(dtype)
-        t0, tr = t0.view(1, 1, -1).expand(-1, self.eta, -1), tr.view(1, self.eta, 1) 
-        t = t0 + tr 
-        t = t.view(1, 1, -1, 1) 
+        t0 = torch.arange(0, T, self.stride, dtype=dtype, device=x.device) # 0~T sampling self.stride, each length = Tout, t0 dim = [T/self.stride]
+        tr = self.tr.to(dtype) # dim = [self.eta]
+        t0, tr = t0.view(1, 1, -1).expand(-1, self.eta, -1), tr.view(1, self.eta, 1) # [1, 1, T/self.stride] => [1, self.eta, T/self.stride], [1, self.eta, 1] 
+        t = t0 + tr # tr would be duplicated to match the size of t0, [1, self.eta, T/self.stride]
+        t = t.view(1, 1, -1, 1) # [1, self.eta, T/self.stride] -> [1, self.eta * T/self.stride, 1, 1]
         
         #indexing
-        tdn = t.detach().floor()
+        tdn = t.detach().floor() # detatch(): no gradient update, [1, self.eta * T/self.stride, 1, 1]; .floor(): 1.8 -> 1.0
         tup = tdn + 1
         index1, index2 = torch.clamp(tdn, 0, self.T-1).long(), torch.clamp(tup, 0, self.T-1).long()
-        index1, index2 = index1.expand(N, C, -1, V), index2.expand(N, C, -1, V)
+        index1, index2 = index1.expand(N, C, -1, V), index2.expand(N, C, -1, V) # [1, self.eta * T/self.stride, 1, 1] => [N, C, self.eta * T/self.stride, V]
         
         #sampling
-        alpha = tup - t
-        x1, x2 = x.gather(-2, index=index1), x.gather(-2, index=index2) 
+        alpha = tup - t # [1, self.eta * T/self.stride, 1, 1]
+        x1, x2 = x.gather(-2, index=index1), x.gather(-2, index=index2) # extract the related x'elements in indexes in index1, index2
         x = x1 * alpha + x2 * (1 - alpha)
         x = x.view(N, C, self.eta, Tout, V)
         
@@ -401,27 +232,21 @@ class MultiScale_TemporalModeling(nn.Module):
     
 class Basic_Block(nn.Module):
     def __init__(self, in_channels, out_channels, A, k, eta, kernel_size=5, stride=1, dilations=2, 
-                 num_frame=64, num_joint=25, residual=True):
+                 num_frame=64, num_joint=25, residual=True, flow_adj=False, node_attention=False):
         super(Basic_Block, self).__init__()
         
         num_scale = 4
-        scale_channels = out_channels // num_scale
+        # scale_channels = out_channels // num_scale
         self.num_scale = num_scale if in_channels !=3 else 1
         
         if in_channels == 3:
             self.gcn = ST_GC(in_channels, out_channels, A)
         else:
-            # self.gcn = DeSGC(in_channels, 
-            #                  out_channels, 
-            #                  A, 
-            #                  k, 
-            #                  self.num_scale, 
-            #                  num_frame=num_frame, 
-            #                  num_joint=num_joint)
             self.gcn = CTR_GC(in_channels, 
                               out_channels, 
                               A, 
-                              self.num_scale)
+                              self.num_scale,
+                              flow_adj=flow_adj)
         self.tcn = MultiScale_TemporalModeling(out_channels, 
                                                out_channels, 
                                                eta,
@@ -443,12 +268,28 @@ class Basic_Block(nn.Module):
         
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         init_param(self.modules())
+        
+        # for node attentions
+        self.node_attention = node_attention
+        if node_attention:
+            self.node_att = NodeAttention(in_channels=out_channels, num_heads=4)
     
     # def forward(self, x):
     def forward(self, x, keypoints=None, flow_map=None):
         res = x
         x = self.gcn(x, keypoints, flow_map)
-        x = self.relu(x + self.residual1(res))
+        
+        # add node attentions
+        if self.node_attention and keypoints is not None and flow_map is not None: 
+            alpha = self.node_att(x)
+            B, C, T, V = x.size()
+            alpha = alpha.view(B, 1, 1, V)
+            res1 = self.residual1(res)
+            gated = alpha * x + (1 - alpha) * res1
+            x = self.relu(gated)
+        else:
+            x = self.relu(x + self.residual1(res))
+        
         x = self.tcn(x)
         x = self.relu(x + self.residual2(res))
         return x
@@ -459,7 +300,7 @@ def bn_init(bn, scale):
     nn.init.constant_(bn.bias, 0)
 
 class DeGCN(nn.Module):
-    def __init__(self, block_args, A, k, eta):
+    def __init__(self, block_args, A, k, eta, flow_adj, node_attention):
         super().__init__()
         self.blocks = nn.ModuleList([
             Basic_Block(
@@ -467,7 +308,9 @@ class DeGCN(nn.Module):
                 stride=stride,
                 num_frame=num_frame,
                 num_joint=num_joint,
-                residual=residual
+                residual=residual,
+                node_attention=node_attention,
+                flow_adj=flow_adj
             )
             for in_ch, out_ch, stride, residual, num_frame, num_joint in block_args
         ])
@@ -483,7 +326,7 @@ class DE_GCN(nn.Module):
         self, model_params:ModelArguments, data_params:DataArguments, num_person=1, k=8, eta=4, drop_out=0,
     ):
         super(DE_GCN, self).__init__()
-        self.graph = Graph(model_params=model_params, data_params=data_params)
+        self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
         A = self.graph.A  # (3, V, V)
         
         self.data_bn = nn.BatchNorm1d(num_person * data_params.num_coords * data_params.num_nodes)
@@ -505,7 +348,7 @@ class DE_GCN(nn.Module):
 
         self.num_stream = model_params.degcn_num_streams
         self.streams = nn.ModuleList([
-            DeGCN(self.blockargs, A, k, eta) for _ in range(self.num_stream)
+            DeGCN(self.blockargs, A, k, eta, flow_adj=model_params.degcn_add_of_A, node_attention=model_params.degcn_add_node_attention) for _ in range(self.num_stream)
         ])
         self.fc = nn.ModuleList([
             nn.Linear(model_params.base_channels*4, model_params.num_classes) for _ in range(self.num_stream)

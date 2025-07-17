@@ -7,8 +7,8 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from ..utils.cli_args import ModelArguments, DataArguments
-from .tools import *
-from .graph import Graph
+from .gcn.tools import *
+from .gcn.graph import Graph
 
 
 
@@ -292,7 +292,7 @@ class TD_GCN(nn.Module):
     def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, drop_out=0, adaptive=True):
         super(TD_GCN, self).__init__()
 
-        self.graph = Graph(model_params=model_params, data_params=data_params)
+        self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
 
         A = self.graph.A # 3,25,25
 
