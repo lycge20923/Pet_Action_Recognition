@@ -211,7 +211,7 @@ class ModelArguments:
         metadata={"help":"Sub directory to store pretrained weights for ST_GCN(self-training)"}
     )
     gcn_model_name: Literal["stgcn", "tdgcn", "degcn"] = field(
-        default="tdgcn",
+        default="degcn",
         metadata={"help": "The model for training and predict. Now we only have ST-GCN & TD-GCN"}
     )
     gcn_weights_file_template: str = field(
@@ -234,12 +234,12 @@ class ModelArguments:
     )
     # possible parameter for ablation study
     degcn_add_of_A: bool = field(
-        default=False,
+        default=True,
         metadata={"help":"Whether add A(from optical flow) in the architecture in DE-GCN"}
     )
     # possible parameter for ablation study
     degcn_add_node_attention: bool = field(
-        default=False, 
+        default=True, 
         metadata={"help":"Whether use node attention class in degcn"}
     )
     
@@ -384,7 +384,7 @@ class TrainingArguments:
         metadata={"help": "Initial learning rate for the optimizer."}
     )
     scheduler_eta_min: float = field(
-        default=1e-5,
+        default=1e-4,
         metadata={"help":"Scheduler's eta_min"}
     )
     train_ratio: float = field(

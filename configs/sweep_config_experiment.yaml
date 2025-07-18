@@ -5,9 +5,9 @@ metric:
   goal: maximize
 parameters:
   exec_name: # change to easily identify
-    values: ["experiment_flow_A_multiple_dims"]
+    values: ["formal:degcn_only"]
   fold_num:
-    values: [0]
+    values: [1]
   # ... other parameters
   epochs:
     values: [10000]
@@ -15,11 +15,7 @@ parameters:
     values: [32]
   add_I3D_branch:
     values: [False]
-  gcn_model_name:
-    values: ["degcn"]
-  scheduler_eta_min:
-    values: [0.0001]
   degcn_add_of_A:
-    values: [True]
-  # degcn_add_node_attention:
-  #   values: [True]
+    values: [False]
+  degcn_add_node_attention:
+    values: [False]
