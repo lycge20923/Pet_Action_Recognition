@@ -113,17 +113,38 @@ class CTR_GC(nn.Module):
         weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)       
         
         # weights = weights * self.alpha.to(weights.dtype) + self.A.view(1, 1, self.Nh, 1, V, V).to(weights.dtype)
+        A_flow = None
         if self.flow_adj and (keypoints is not None) and (flow_seq is not None):
-            A_flow = self.flow_adj(flow_seq, keypoints)  # (V, V)
-
+            A_flow = self.flow_adj(flow_seq, keypoints)  # (N, V, V)
             Af = A_flow.unsqueeze(1).expand(-1, self.Nh, -1, -1) 
-            dtype, device = weights.dtype, weights.device
             A_dyn = (beta * Af).unsqueeze(1).unsqueeze(3)
             A_dyn = A_dyn.to(weights.dtype).to(weights.device)
         else:
             A_dyn = 0
         dtype = weights.dtype
         device = weights.device
+        
+        # test
+        with torch.no_grad():
+            import json
+            stats = {
+                "self.A_min":  self.A.min().item(),
+                "self.A_max":  self.A.max().item(),
+                "self.A_mean": self.A.mean().item(),
+                "self.A_std":  self.A.std().item(),
+                "weights_min":  weights.min().item(),
+                "weights_max":  weights.max().item(),
+                "weights_mean": weights.mean().item(),
+                "weights_std":  weights.std().item(),
+                }
+            if A_flow is not None:
+                stats["A_flow_min"] = A_flow.min().item()
+                stats["A_flow_max"] = A_flow.max().item()
+                stats["A_flow_mean"] = A_flow.mean().item()
+                stats["A_flow_std"] = A_flow.std().item()
+            with open('supervise_A.json', 'w', encoding='utf-8') as f:
+                 json.dump(stats, f, ensure_ascii=False, indent=4)
+        
         A_static = (alpha * self.A).view(1,1,self.Nh,1,V,V).to(dtype).to(device)
         weights = weights * self.alpha.to(dtype) + A_static + A_dyn
             
@@ -273,6 +294,7 @@ class Basic_Block(nn.Module):
         self.node_attention = node_attention
         if node_attention:
             self.node_att = NodeAttention(in_channels=out_channels, num_heads=4)
+            # self.node_att = NodeAttention(in_channels=out_channels, num_heads=4, A=A)
     
     # def forward(self, x):
     def forward(self, x, keypoints=None, flow_map=None):
@@ -280,8 +302,23 @@ class Basic_Block(nn.Module):
         x = self.gcn(x, keypoints, flow_map)
         
         # add node attentions
-        if self.node_attention and keypoints is not None and flow_map is not None: 
+        if self.node_attention: 
+            # print("x.shape", x.shape)
             alpha = self.node_att(x)
+            
+            # test
+            with torch.no_grad():
+                import json
+                stats = {
+                    "alpha_min":  alpha.min().item(),
+                    "alpha_max":  alpha.max().item(),
+                    "alpha_mean": alpha.mean().item(),
+                    "alpha_std":  alpha.std().item()
+                    }
+                with open('supervise_node_attn.json', 'w', encoding='utf-8') as f:
+                    json.dump(stats, f, ensure_ascii=False, indent=4)
+            
+            # print("alpha:", alpha)
             B, C, T, V = x.size()
             alpha = alpha.view(B, 1, 1, V)
             res1 = self.residual1(res)

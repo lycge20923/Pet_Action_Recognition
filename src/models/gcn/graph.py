@@ -8,7 +8,7 @@ class Graph:
         self.num_node = num_nodes
         self.self_link = [(i, i) for i in range(self.num_node)]
         inward_ori_index = neighbor_base
-        self.inward = [(i - 1, j - 1) for (i, j) in inward_ori_index]
+        self.inward = [(i, j) for (i, j) in inward_ori_index]
         self.outward = [(j, i) for (i, j) in self.inward]
         self.neighbor = self.inward + self.outward
         self.A = self.get_adjacency_matrix(labeling_mode)
