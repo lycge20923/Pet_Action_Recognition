@@ -387,6 +387,10 @@ class TrainingArguments:
         default=1e-4,
         metadata={"help":"Scheduler's eta_min"}
     )
+    resume_checkpoint_dir: str = field(
+        default=None,
+        metadata={"help":"If there is no value, retrain; if there is a value, load the pretrained weights."}
+    )
     train_ratio: float = field(
         default=0.8,
         metadata={"help": "Ratio of the dataset to use for training (the rest for validation)."}
@@ -435,6 +439,10 @@ class TrainingArguments:
     save_gcn_weights: bool = field(
         default=False,
         metadata={"help": "Whether cover the best model weight of STGCN."}
+    )
+    save_predict_details_namne: str = field(
+        default="details.json",
+        metadata={"help": "The file name for saving predict details(could choose send nothing to not save)"}
     )
     use_multiplie_learning_rates: bool = field(
         default=False,

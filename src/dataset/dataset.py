@@ -107,6 +107,7 @@ class KpOfDataset(Dataset):
         # And 'action_id' is the label
         # load keypoints from the .npz window file
         feat_path = self.annotations[index]["feature_file"]
+        video_name = self.annotations[index]["video_name"]
         data = np.load(feat_path)
         
         # --- optical flows & keypoints ---
@@ -207,7 +208,7 @@ class KpOfDataset(Dataset):
         else:
             optical_flows_tensor = None
 
-        return keypoints_tensor, optical_flows_tensor, label
+        return keypoints_tensor, optical_flows_tensor, label, video_name
 
 class SiameseKpOfDataset(Dataset):
     """
@@ -232,7 +233,7 @@ class SiameseKpOfDataset(Dataset):
         return len(self.base)
 
     def __getitem__(self, index):
-        kp1, flow1, lab1 = self.base[index]
+        kp1, flow1, lab1, _ = self.base[index]
         lab1_int = int(lab1.item())
 
         # obtain another sample
@@ -244,7 +245,7 @@ class SiameseKpOfDataset(Dataset):
             idx2 = random.choice(self.label_to_indices[neg_label])
             y = 1.0
 
-        kp2, flow2, lab2 = self.base[idx2]
+        kp2, flow2, lab2, _ = self.base[idx2]
         
         y = torch.tensor(y, dtype=torch.float32)
         

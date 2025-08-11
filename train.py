@@ -1,4 +1,4 @@
-from collections import Counter
+from collections import defaultdict, Counter
 import dataclasses
 from datetime import datetime
 import json
@@ -106,13 +106,15 @@ def custom_collate(batch):
         kp_list = [item[0] for item in batch]
         flow_list = [item[1] for item in batch] 
         lab_list = [item[2] for item in batch]
+        name_list = [item[3] for item in batch]
         
         collated_lab = default_collate(lab_list)
+        name_lab = default_collate(name_list)
         
         # special case for optical flow
         collated_kp = default_collate(kp_list) if (kp_list and kp_list[0] is not None) else None
         collated_flow = default_collate(flow_list) if (flow_list and flow_list[0] is not None) else None
-        return collated_kp, collated_flow, collated_lab
+        return collated_kp, collated_flow, collated_lab, name_lab
     
 def prepare_dataloaders(data_params:DataArguments, 
                         aug_params_train:AugmentationArguments, 
@@ -230,6 +232,20 @@ def build_model_and_optimizer(model_params:ModelArguments,
     
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=train_params.scheduler_eta_min)
     
+    if train_params.resume_checkpoint_dir != None:
+        try:
+            checkpoint_names = [f for f in os.listdir(train_params.resume_checkpoint_dir) if f.endswith(".pth")]
+            checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
+            checkpoint_path = os.path.join(train_params.resume_checkpoint_dir, checkpoint_name)
+            ckpt = torch.load(checkpoint_path, map_location=train_params.device)
+            if not train_params.add_contrastive_loss:
+                model.load_state_dict(ckpt["model_state_dict"])
+            else:
+                model.backbone.load_state_dict(ckpt["model_state_dict"])
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        except Exception as e:
+            print(f"Fails to load pre-trained weights, try to re-train")
+    
     return {"loss":{"cross entropy": cross_entropy_loss, "contrastive learning": contrastive_loss}, "model":model, "optimizer":optimizer, "scheduler":scheduler}
 
 def set_seed(seed):
@@ -293,7 +309,7 @@ def train_one_epoch(model,
             correct += (pred1 == lab1).sum().item()
             correct += (pred2 == lab2).sum().item()
         else: 
-            kps, flow, label = batch_data
+            kps, flow, label, _ = batch_data
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
@@ -311,8 +327,29 @@ def train_one_epoch(model,
             _, predict = torch.max(output.data, 1)
             correct += (predict == label).sum().item()
         
-        wandb.log({"train_batch_loss_total": batch_loss_total.item(), 
-                   "train_batch_loss_ce": batch_loss_ce.item()})
+        # # —— 1) 计算并 log 梯度范数 —— 
+        
+        # total_node_grad_sq = 0.0
+        # total_grad_sq = 0.0
+        # total_self_A = 0.0
+        # # for name, param in model.named_parameters():
+        # #     if 'node_att.attn' in name and param.grad is not None:
+        # #         print(name, param.grad.norm())
+        #     # if 'residual2' in name and param.grad is not None:
+        #     #     print(f"{name} grad norm: {param.grad.norm().item()}")
+        # for name, param in model.named_parameters():
+        #     if 'flow_adj' in name and param.grad is not None:
+        #         total_node_grad_sq += param.grad.detach().norm(2).item() ** 2
+        #     if param.grad is not None:
+        #         total_grad_sq += param.grad.detach().norm(2).item() ** 2
+        #     if name.endswith(".A"):
+        #         total_self_A = param.grad.detach().norm(2).item() ** 2
+        # grad_norm = total_grad_sq ** 0.5
+        # print("train/total_grad_norm:", grad_norm)
+        # node_grad_norm = total_node_grad_sq ** 0.5
+        # print("train/flow:", node_grad_norm, "\nstep:", epoch * len(loader) + batch_idx)
+        # self_A_norm = total_self_A ** 0.5
+        # print("train/self.A:", self_A_norm, "\nstep:", epoch * len(loader) + batch_idx)
         
         
     epoch_loss = sum_loss / len(loader.dataset) 
@@ -321,7 +358,12 @@ def train_one_epoch(model,
     wandb.log({"epoch": epoch, "train_loss":epoch_loss, "train_acc": epoch_acc})
     return epoch_loss, epoch_acc
 
-def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_params:TrainingArguments):
+def val_one_epoch(model, 
+                  loader, 
+                  cross_entropy_loss, 
+                  epoch, 
+                  actions:list, 
+                  train_params:TrainingArguments):
     model.eval()
     test_correct = 0
     test_loss = 0
@@ -335,9 +377,10 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
     # for precision, recall, f1
     all_trues = []
     all_preds = []
+    all_details = defaultdict(lambda: {"preds": [], "ground-trues": []})
     
     with torch.no_grad():
-        for kps, flow, label in loader:
+        for kps, flow, label, video_name in loader:
             
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
@@ -357,6 +400,14 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
             # add batch label & predict to list
             all_trues.extend(label.cpu().numpy())
             all_preds.extend(predict.cpu().numpy())
+            
+            # collect details
+            for i in range(current_batch_size):
+                vn = video_name[i]
+                gt = int(label[i].item())
+                pd = int(predict[i].item())
+                all_details[vn]["ground-trues"].append(gt)
+                all_details[vn]["preds"].append(pd)
             
             # calculate class-wise accuracy
             corrects = (predict == label)
@@ -418,7 +469,7 @@ def val_one_epoch(model, loader, cross_entropy_loss, epoch, actions:list, train_
         # print(f"  Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
         print(f"  Class {actions[i]}, P {prec_i:.4f}, R {rec_i:.4f}({cor_i}/{tot_i}), F1 {f1_i:.4f}")
     
-    return epoch_loss, epoch_acc, cm
+    return epoch_loss, epoch_acc, cm, all_details
 
 def main():
     # initial set
@@ -458,7 +509,7 @@ def main():
         train_loss, train_acc = train_one_epoch(model, train_loader, cross_entropy_loss, optimizer, epoch, train_params, contrastive_loss)
         print(f"Epoch {epoch+1} Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         
-        val_loss, val_acc, cm = val_one_epoch(model, val_loader, cross_entropy_loss, epoch, actions=data_params.actions, train_params=train_params)
+        val_loss, val_acc, cm, all_details = val_one_epoch(model, val_loader, cross_entropy_loss, epoch, actions=data_params.actions, train_params=train_params)
         print(f"Epoch {epoch+1} Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
         # save for plottting
@@ -504,6 +555,15 @@ def main():
             # save cofusion matrix
             np.savetxt(os.path.join(saving_dir, "confusion_matrix.csv"), cm, fmt="%.2f", delimiter=',')
             
+            # pre-process and save predict details
+            for video_name, details in all_details.items():
+                all_details[video_name]["ground-trues"] = ' '.join(set([data_params.actions[index] for index in all_details[video_name]["ground-trues"]]))
+                all_details[video_name]["preds"] = '|'.join([data_params.actions[index] for index in all_details[video_name]["preds"]])
+            
+            details_path = os.path.join(saving_dir, train_params.save_predict_details_namne)
+            with open(details_path, "w", encoding="utf-8") as f:
+                json.dump(all_details, f, ensure_ascii=False, indent=2)
+
             patient_count = 0
         wandb.log({"best_val_acc": best_val_acc})
         # early stopping 

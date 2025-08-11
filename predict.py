@@ -26,22 +26,20 @@ from src.models.model import ActionRecognitionModel
 from features.pose_estimation import PoseEstimationModel
 from features.optical_flow import OpticalFlowModel
 
-def _parse_args():
+def parse_args():
     parser = argparse.ArgumentParser(description='Prediction for Action Recognition')
     parser.add_argument('--input_path', required=True, help="The video path")
     parser.add_argument('--checkpoint_dir', required=True, help="The directory storing the pretrained weight")
     parser.add_argument('--checkpoint_name', default="best.pth", help="The .pth name")
     return parser.parse_args()
 
-def main():
+def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     
     # --- set logger ---
     logger = setup_logger(file_path=__file__,level=logging.INFO)
     
-    # --- get args ---
-    args = _parse_args()
     save_adjusted_args_name = TrainingArguments().save_adjusted_args_name
-    adjusted_params_path = os.path.join(args.checkpoint_dir, save_adjusted_args_name)
+    adjusted_params_path = os.path.join(checkpoint_dir, save_adjusted_args_name)
     
     # load adjusted parameters if exists
     if os.path.exists(adjusted_params_path):
@@ -55,7 +53,7 @@ def main():
     data_params = DataArguments()
     output_params = OutputArguments()
     
-    checkpoint_path = os.path.join(args.checkpoint_dir, args.checkpoint_name)
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
     
     # --- set output folder ---
     timestampe = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -63,19 +61,19 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     # --- input file name ---
-    file_name = os.path.basename(args.input_path)
+    file_name = os.path.basename(input_path)
     base, extension = file_name.split('.')
     
     # --- calculate time and frames----
-    video_info = get_video_info(args.input_path)
+    video_info = get_video_info(input_path)
     fps, frame_width, frame_height, frame_count = \
         video_info["fps"], video_info["frame_width"], video_info["frame_height"], video_info["frame_count"]
-    logger.info(f"The input video:{args.input_path}. \n * FPS: {fps} \n * Frame width: {frame_width} \n * Frame height: {frame_height} \n * Frame count: {frame_count} \n Duration: {frame_count/fps:.2f}(s)")
+    logger.info(f"The input video:{input_path}. \n * FPS: {fps} \n * Frame width: {frame_width} \n * Frame height: {frame_height} \n * Frame count: {frame_count} \n Duration: {frame_count/fps:.2f}(s)")
     
     # --- video stabilization(depend on the config) ---
     if not data_params.skip_stabilization:
         start_time= time.time()
-        stabilized_result = video_stabilization(args.input_path, data_params.stabilized_crop_percentage)
+        stabilized_result = video_stabilization(input_path, data_params.stabilized_crop_percentage)
         logger.info(f"Time for stabilizing video: {time.time() - start_time} seconds") 
         
         # write stabilized videos 
@@ -86,7 +84,7 @@ def main():
         for stabilized_img in stabilized_np:
             writer.write(stabilized_img)
         writer.release()
-        args.input_path = output_stabilized_path
+        input_path = output_stabilized_path
         
     # --- feature extraction ---
     # initialize model
@@ -95,7 +93,7 @@ def main():
     
     # extract keypoints
     start_time= time.time()
-    result_pe = pe_model.predict(input_path=args.input_path, plot_path=output_pe_path, plot_threshold=data_params.plot_pe_threshold)
+    result_pe = pe_model.predict(input_path=input_path, plot_path=output_pe_path, plot_threshold=data_params.plot_pe_threshold)
     logger.info(f"Time for extracting pose estimation: {time.time() - start_time} seconds") 
     
     keypoints_all_frames, bboxes_all_frames = result_pe["keypoints"], result_pe["bboxes"]
@@ -125,7 +123,7 @@ def main():
     optical_model = OpticalFlowModel(**asdict(of_params))
     output_crop_path = os.path.join(output_dir, f"{base}_crop.{extension}")
     crop_and_save_video(
-        input_path=args.input_path,
+        input_path=input_path,
         bbox_annotation=bbox_annotation,
         output_path=output_crop_path,
         resize_scale=of_params.input_model_size,
@@ -188,4 +186,5 @@ def main():
     
     
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    predict(input_path=args.input_path, checkpoint_dir=args.checkpoint_dir, checkpoint_name=args.checkpoint_name)
