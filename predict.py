@@ -17,7 +17,7 @@ import json
 import yaml
 
 from src.utils.logging_utils import setup_logger
-from src.utils.cli_args import DataArguments, ModelArguments, OutputArguments, PoseEstimationArguments, OpticalFlowArguments, TrainingArguments
+from src.utils.cli_args import DataArguments, ModelArguments, ResultsArguments, PoseEstimationArguments, OpticalFlowArguments, TrainingArguments
 from src.utils.common import get_video_info, load_from_wandb
 from src.data_processing.stabilization import video_stabilization
 from src.data_processing.feature_extraction import normalize_keypoints, crop_and_save_video
@@ -51,7 +51,7 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
         logger.warning("There is no 'args_adjusted.yaml' in the checkpoint dircetory.") 
         logger.warning("You have to adjust predict.py to manually pass in the correct parameters.")
     data_params = DataArguments()
-    output_params = OutputArguments()
+    output_params = ResultsArguments()
     
     checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
     
@@ -155,7 +155,7 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     
     # ---prediction ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
+    coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
     coords = np.load(coord_path)
     model = ActionRecognitionModel(model_params, data_params, coords).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)

@@ -185,7 +185,7 @@ class ST_GCN(nn.Module):
             num_nodes=data_params.num_nodes,
             neighbor_base=model_params.neighbor_base,
             coords=coords,
-            hop_size=model_params.hop_size,
+            hop_size=model_params.stgcn_hop_size,
             normalization_strategy='symmetric'
         )
         A = torch.tensor(graph.A, dtype=torch.float32, requires_grad=False)
@@ -218,7 +218,7 @@ class ST_GCN(nn.Module):
                     stride=conf['stride'],
                     t_kernel_size=model_params.t_kernel_size,
                     A_size=A_size,
-                    dilation=model_params.dilation
+                    dilation=model_params.stgcn_dilation
                 )
             )
         
@@ -229,7 +229,7 @@ class ST_GCN(nn.Module):
         #     stride=1,
         #     t_kernel_size=model_params.t_kernel_size,
         #     A_size=A_size,
-        #     dilation=model_params.dilation
+        #     dilation=model_params.stgcn_dilation
         # )
         # self.stgc2 = STGC_block(
         #     model_params.base_channels,
@@ -237,7 +237,7 @@ class ST_GCN(nn.Module):
         #     stride=1,
         #     t_kernel_size=model_params.t_kernel_size,
         #     A_size=A_size,
-        #     dilation=model_params.dilation
+        #     dilation=model_params.stgcn_dilation
         # )
         # self.stgc3 = STGC_block(
         #     model_params.base_channels*2,
@@ -245,7 +245,7 @@ class ST_GCN(nn.Module):
         #     stride=2,
         #     t_kernel_size=model_params.t_kernel_size,
         #     A_size=A_size,
-        #     dilation=model_params.dilation
+        #     dilation=model_params.stgcn_dilation
         # )
         # self.stgc4 = STGC_block(
         #     model_params.base_channels*4,
@@ -253,7 +253,7 @@ class ST_GCN(nn.Module):
         #     stride=1,
         #     t_kernel_size=model_params.t_kernel_size,
         #     A_size=A_size,
-        #     dilation=model_params.dilation
+        #     dilation=model_params.stgcn_dilation
         # )
         # Prediction head
         self.fc = nn.Conv2d(model_params.base_channels*4, model_params.num_classes, kernel_size=1)

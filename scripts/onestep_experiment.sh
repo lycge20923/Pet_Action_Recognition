@@ -2,7 +2,7 @@
 set -euo pipefail
 
 GPU_ID="$1"
-SWEEP_ARG="configs/sweep_config_experiment.yaml"
+SWEEP_ARG="configs/sweep_experiment.yaml"
 
 # 1. Extract stdout 和 stderr
 OUTPUT=$(wandb sweep "$SWEEP_ARG" 2>&1)

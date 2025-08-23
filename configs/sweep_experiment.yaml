@@ -5,17 +5,15 @@ metric:
   goal: maximize
 parameters:
   exec_name: # change to easily identify
-    values: ["formal:degcn_only"]
+    values: ["experiment:this is a test"]
   fold_num:
-    values: [1]
+    values: [0]
+  
   # ... other parameters
   epochs:
-    values: [10000]
+    values: [3000]
   batch_size:
     values: [32]
   add_I3D_branch:
     values: [False]
-  degcn_add_of_A:
-    values: [False]
-  degcn_add_node_attention:
-    values: [False]
+  

@@ -18,7 +18,7 @@ from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
 from src.dataset.dataset import KpOfDataset, SiameseKpOfDataset
 from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
-from src.utils.common import load_from_wandb
+from src.utils.common import load_from_wandb, saving_self_training_best_gcn_weights_path
 
 def setup_experiments():
     # set wandb
@@ -35,13 +35,13 @@ def setup_experiments():
     model_params = load_from_wandb(ModelArguments, config)
     train_params = load_from_wandb(TrainingArguments, config)
     aug_params_train = load_from_wandb(AugmentationArguments, config)
+    data_params = load_from_wandb(DataArguments, config)
     aug_params_eval = AugmentationArguments(augment=False)
-    data_params = DataArguments()
     
     # saving dir
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
-    saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_dir_name, timestamp)
+    saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_root_dir_name, timestamp)
     os.makedirs(saving_dir, exist_ok=True)
     
     # save parameters
@@ -122,8 +122,8 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
     
-    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False, fold_num=train_params.fold_num)
-    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True, fold_num=train_params.fold_num)
+    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False, fold_num=data_params.fold_num)
+    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True, fold_num=data_params.fold_num)
     
     # calculate the dataset size
     train_size = len(train_dataset)
@@ -151,16 +151,19 @@ def prepare_dataloaders(data_params:DataArguments,
     if train_params.add_contrastive_loss:
         train_dataset = SiameseKpOfDataset(train_dataset, data_params)
     
-    coord_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
-    if not os.path.exists(coord_path):
-        sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
-        if isinstance(sample, torch.Tensor):
-            sample = sample.cpu().numpy()
-        sample.mean(axis=1)
-        coords = sample.mean(axis=1).T 
-        np.save(coord_path, coords)
+    if model_params.gcn_model_name == "stgcn":
+        coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
+        if not os.path.exists(coord_path):
+            sample, _ , _ = val_dataset[0]            # sample.shape = (C, T, V)
+            if isinstance(sample, torch.Tensor):
+                sample = sample.cpu().numpy()
+            sample.mean(axis=1)
+            coords = sample.mean(axis=1).T 
+            np.save(coord_path, coords)
+        else:
+            coords = np.load(coord_path)
     else:
-        coords = np.load(coord_path)
+        coords = None
     
     print("Start to add to Dataloader")
     # build dataloader
@@ -327,31 +330,6 @@ def train_one_epoch(model,
             _, predict = torch.max(output.data, 1)
             correct += (predict == label).sum().item()
         
-        # # —— 1) 计算并 log 梯度范数 —— 
-        
-        # total_node_grad_sq = 0.0
-        # total_grad_sq = 0.0
-        # total_self_A = 0.0
-        # # for name, param in model.named_parameters():
-        # #     if 'node_att.attn' in name and param.grad is not None:
-        # #         print(name, param.grad.norm())
-        #     # if 'residual2' in name and param.grad is not None:
-        #     #     print(f"{name} grad norm: {param.grad.norm().item()}")
-        # for name, param in model.named_parameters():
-        #     if 'flow_adj' in name and param.grad is not None:
-        #         total_node_grad_sq += param.grad.detach().norm(2).item() ** 2
-        #     if param.grad is not None:
-        #         total_grad_sq += param.grad.detach().norm(2).item() ** 2
-        #     if name.endswith(".A"):
-        #         total_self_A = param.grad.detach().norm(2).item() ** 2
-        # grad_norm = total_grad_sq ** 0.5
-        # print("train/total_grad_norm:", grad_norm)
-        # node_grad_norm = total_node_grad_sq ** 0.5
-        # print("train/flow:", node_grad_norm, "\nstep:", epoch * len(loader) + batch_idx)
-        # self_A_norm = total_self_A ** 0.5
-        # print("train/self.A:", self_A_norm, "\nstep:", epoch * len(loader) + batch_idx)
-        
-        
     epoch_loss = sum_loss / len(loader.dataset) 
     epoch_acc = correct / total_individual_samples
     
@@ -422,15 +400,6 @@ def val_one_epoch(model,
     
     epoch_acc = test_correct / len(loader.dataset)
     epoch_loss = test_loss / len(loader.dataset)
-    
-    # per_class_acc = []
-    # for i in range(num_classes):
-    #     TP = cm[i, i]
-    #     FN = cm[i, :].sum() - TP
-    #     FP = cm[:, i].sum() - TP
-    #     TN = len(loader.dataset) - TP - FN - FP
-    #     per_class_acc.append((TP + TN) / len(loader.dataset))
-    # per_class_acc = torch.tensor(per_class_acc).to(device)
     
     # for precision, recall, f1
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
@@ -525,26 +494,24 @@ def main():
             print(f"Validation accuracy improved ({best_val_acc:.4f} --> {val_acc:.4f}). Saving model...")
             best_val_acc = val_acc
             if train_params.add_contrastive_loss:
-                weights_to_save = model.backbone.state_dict()
-                if train_params.save_gcn_weights:
-                    torch.save(
-                        model.backbone.skel_model.state_dict(),
-                        os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
-                    )
+                save_model = model.backbone
                 print("Info: Saving backbone (ActionRecognitionModel) state_dict from ContrastiveActionWrapper.")
             else:
-                weights_to_save = model.state_dict()
-                if train_params.save_gcn_weights:
-                    torch.save(
-                        model.skel_model.state_dict(),
-                        os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
-                    )
+                save_model = model
                 print("Info: Saving ActionRecognitionModel state_dict.")
-                
-            # save model
+            
+            # save 
+            # for best model saving
+            if train_params.save_best_gcn_weights:
+                torch.save(
+                    save_model.skel_model.state_dict(),
+                    saving_self_training_best_gcn_weights_path(data_params,model_params)
+                )
+            
+            # for one-run model saving
             torch.save({
                 'epoch': epoch + 1,
-                'model_state_dict': weights_to_save,
+                'model_state_dict': save_model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': val_loss,
                 'accuracy': val_acc,
@@ -560,9 +527,10 @@ def main():
                 all_details[video_name]["ground-trues"] = ' '.join(set([data_params.actions[index] for index in all_details[video_name]["ground-trues"]]))
                 all_details[video_name]["preds"] = '|'.join([data_params.actions[index] for index in all_details[video_name]["preds"]])
             
-            details_path = os.path.join(saving_dir, train_params.save_predict_details_namne)
-            with open(details_path, "w", encoding="utf-8") as f:
-                json.dump(all_details, f, ensure_ascii=False, indent=2)
+            if train_params.save_predict_details_name:
+                details_path = os.path.join(saving_dir, train_params.save_predict_details_name)
+                with open(details_path, "w", encoding="utf-8") as f:
+                    json.dump(all_details, f, ensure_ascii=False, indent=2)
 
             patient_count = 0
         wandb.log({"best_val_acc": best_val_acc})

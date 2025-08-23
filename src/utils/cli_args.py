@@ -81,10 +81,6 @@ class DataArguments:
         default=5,
         metadata={"help":"Number of folds to use for cross-validation."}
     )
-    fold_allow_diff: int = field(
-        default=200, 
-        metadata={"help":"The maximum allowed difference in the number of samples between action classes."}
-    )
     min_kp_rate: float = field(
         default=0.5,
         metadata={"help":"Filter out those videos having low keypoint detection rate"}
@@ -106,9 +102,9 @@ class DataArguments:
         default=17,
         metadata={"help":"The defined number of keypoints that can be detected"}
     )
-    num_coords: int = field(
-        default=3,
-        metadata={"help":"The size of each coordination"}
+    fold_num: int = field(
+        default=0,
+        metadata={"help": "Fold number for k-fold cross-validation in the training step."}
     )
 
 @dataclass
@@ -150,7 +146,7 @@ class OpticalFlowArguments:
     )
 
 @dataclass
-class OutputArguments:
+class ResultsArguments:
     output_dir: str = field(
         default="output",
         metadata={"help":"Dir storing experimental results"}
@@ -158,26 +154,23 @@ class OutputArguments:
 
 @dataclass
 class ModelArguments:
-    hop_size: int = field(
-        default=1,
-        metadata={"help":"Define what is 'neighbor'"}
-    )
-    in_channels: int = field(
+    _num_coords: int = field(
         default=3,
-        metadata={"help":"Input channel size in st-gcn"}
+        metadata={"help": "The size of each coordination"}
     )
+    add_flow_coords: bool = field(
+        default=True,
+        metadata={"help":"Delete confidence, and extend optical flow information (m_x, m_y, std_x, std_y) for gcn"}
+    )
+    @property
+    def in_channels(self) -> int:
+        if self.add_flow_coords:
+            return 6
+        return self._num_coords
     base_channels: int = field(
         default=64, 
         metadata={"help":"Base channel size in gcn."}
     )
-    # intermediate_channels: int = field(
-    #     default=32,
-    #     metadata={"help":"Intermediate channel size in st-gcn"}
-    # )
-    # final_channels: int = field(
-    #     default=128,
-    #     metadata={"help":"Final channel size in st-gcn"}
-    # )
     t_kernel_size: int =field(
         default=13,
         metadata={'help':"refer total t kernel size in temporal conv"}
@@ -190,21 +183,17 @@ class ModelArguments:
         default_factory=lambda: list(DEFAULT_SKELETON_LIST),
         metadata={"help": "List of skeleton (node pairs) to be recognized."}
     )
-    dilation: int = field(
-        default=1,
-        metadata={"help":"Dilation for ST-GCN"}
-    )
     multihead_emb_dim: int = field(
         default=128, 
         metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
     )
-    # add_optical_flow: bool = field(
-    #     default=True,
-    #     metadata={"help":"Whether adding optical flow"}
-    # )
-    pretrained_weight_dir: str = field(
+    pretrained_weights_root_dir_name: str = field(
         default="models",
-        metadata={"help":"Root directory to store pretrained weights"}
+        metadata={"help": "Root directory to store pretrained weights"}
+    )
+    self_training_weights_dir_name: str = field(
+        default="self_training",
+        metadata={"help": "Directory name for saving self-training weights"}
     )
     gcn_weights_dir_name: str = field(
         default="GCN",
@@ -232,25 +221,29 @@ class ModelArguments:
         default=2, 
         metadata= {"help": "The number of streams used in DE-GCN"}
     )
-    # possible parameter for ablation study
-    degcn_add_of_A: bool = field(
+    # for ablation study
+    add_flow_adjacency: bool = field(
         default=True,
-        metadata={"help":"Whether add A(from optical flow) in the architecture in DE-GCN"}
+        metadata={"help":"Whether add leanable adjacency matrix from optical flow in the architecture in DE-GCN"}
     )
-    # possible parameter for ablation study
-    degcn_add_node_attention: bool = field(
-        default=True, 
-        metadata={"help":"Whether use node attention class in degcn"}
-    )
-    
     load_gcn_weights: bool = field(
         default=False, 
-        metadata={"help":"Whether continue training using pre-trained ST-GCN"}
+        metadata={"help":"Whether continue training using pre-trained GCN model weights"}
+    )
+    # stgcn related parameters
+    stgcn_hop_size: int = field(
+        default=1,
+        metadata={"help":"Define what is 'neighbor'"}
+    )
+    stgcn_dilation: int = field(
+        default=1,
+        metadata={"help":"Dilation for ST-GCN"}
     )
     stgcn_coords_file_name: str = field(
         default="coords_stgcn.npy",
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
     )
+    # I3D related parameters
     add_I3D_branch: bool = field(
         default=True,
         metadata={"help":"Whether add parallel I3D branch in the model for the prediction"}
@@ -275,10 +268,6 @@ class ModelArguments:
         default=128,
         metadata={"help":"Project to have the similar size with ST-GCN"}
     )
-    # only_optical_flow: bool = field(
-    #     default=False, 
-    #     metadata={"help":"Only use optical flow and I3D to conduct action recognition"}
-    # )
     
     
 @dataclass
@@ -367,17 +356,14 @@ class TrainingArguments:
         default="cuda" if torch.cuda.is_available() else "cpu",
         metadata={"help": "Device to use for training (e.g., 'cuda', 'cpu')."}
     )
-    fold_num: int = field(
-        default=0,
-        metadata={"help": "Fold number for k-fold cross-validation in the training step."}
-    )
+
     epochs: int = field(
         default=100,
-        metadata={"help": "Total number of training epochs."}
+        metadata={"help": "Total number of training epochs. For only training GCN, it is recommended to change to at least 1000"}
     )
     batch_size: int = field(
         default=16,
-        metadata={"help": "Batch size for training and evaluation."}
+        metadata={"help": "Batch size for training and evaluation. For only training GCN, it should change to 32"}
     )
     learning_rate: float = field(
         default=1e-4,
@@ -411,9 +397,9 @@ class TrainingArguments:
         default=0.9,
         metadata={"help": "Momentum factor for SGD optimizer (if used)."}
     )
-    save_dir_name: str = field(
+    save_root_dir_name: str = field(
         default="runs",
-        metadata={"help":"Saving dir for training"}
+        metadata={"help":"The root directory for saving files while training"}
     )
     patient_epochs: int = field(
         default= 1000, 
@@ -436,13 +422,13 @@ class TrainingArguments:
         default="args_adjusted.yaml",
         metadata={"help":"The file name for saving adjusted args, those would be used in prediction"}
     )
-    save_gcn_weights: bool = field(
+    save_best_gcn_weights: bool = field(
         default=False,
         metadata={"help": "Whether cover the best model weight of STGCN."}
     )
-    save_predict_details_namne: str = field(
+    save_predict_details_name: str = field(
         default="details.json",
-        metadata={"help": "The file name for saving predict details(could choose send nothing to not save)"}
+        metadata={"help": "The file name for saving predict details(could set None not to save)"}
     )
     use_multiplie_learning_rates: bool = field(
         default=False,

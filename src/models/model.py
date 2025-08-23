@@ -9,6 +9,7 @@ from .tdgcn import TD_GCN
 from .degcn import DE_GCN
 from .I3D import InceptionI3d
 from ..utils.cli_args import ModelArguments, DataArguments
+from ..utils.common import saving_self_training_best_gcn_weights_path
 
 class ActionRecognitionModel(nn.Module):
     def __init__(self, 
@@ -43,7 +44,7 @@ class ActionRecognitionModel(nn.Module):
             self.I3D = InceptionI3d(in_channels=2)
             
             # load weight 
-            i3d_weights_path = os.path.join(model_params.pretrained_weight_dir,
+            i3d_weights_path = os.path.join(model_params.pretrained_weights_root_dir_name,
                                                 model_params.I3D_weights_dir_name,
                                                 model_params.I3D_weights_file_name)
             self.I3D.load_state_dict(torch.load(i3d_weights_path))
@@ -53,7 +54,7 @@ class ActionRecognitionModel(nn.Module):
 
         # for using both skeleton and optical flow, we should load the pretrained weights of GCN
         if (model_params.load_gcn_weights or self.add_I3D_branch) and not self.only_I3D_branch:
-            gcn_weights_path = os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.gcn_weights_file_name)
+            gcn_weights_path = saving_self_training_best_gcn_weights_path(data_params, model_params)
             self.skel_model.load_state_dict(torch.load(gcn_weights_path))            
             
         
@@ -63,7 +64,6 @@ class ActionRecognitionModel(nn.Module):
             self.total_feature_dimension += self._projected_flow_feat_dim
         self.final_classifier = nn.Linear(self.total_feature_dimension, model_params.num_classes)
     
-        
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
         # 1. only optical flow
         if self.only_I3D_branch:
@@ -92,7 +92,11 @@ class ContrastiveActionWrapper(nn.Module):
         self.backbone = backbone
         backbone_output_feat_dim = self.backbone.total_feature_dimension
         self.proj_head = nn.Linear(backbone_output_feat_dim, emb_dim)
-        
+    
+    '''
+    def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None, labels=None):
+        feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow, labels=labels)
+    '''
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
         feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
@@ -101,7 +105,7 @@ class ContrastiveActionWrapper(nn.Module):
 if __name__ == "__main__":
     import numpy as np 
     model_params, data_params = ModelArguments(), DataArguments()
-    coords = np.load(os.path.join(model_params.pretrained_weight_dir, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name))
+    coords = np.load(os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name))
     act_model = ActionRecognitionModel(model_params, data_params, coords)
     act_model.eval()
 

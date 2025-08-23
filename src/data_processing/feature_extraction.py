@@ -7,7 +7,7 @@ import json
 import numpy as np
 import cv2
 
-from ..utils.cli_args import DataArguments, PoseEstimationArguments, OpticalFlowArguments, OutputArguments
+from ..utils.cli_args import DataArguments, PoseEstimationArguments, OpticalFlowArguments, ResultsArguments
 from features.pose_estimation import PoseEstimationModel
 from features.optical_flow import OpticalFlowModel
 from ..utils.logging_utils import setup_logger
@@ -124,7 +124,7 @@ def main():
     
     # create for plot path
     if data_args.plot_pe:
-        output_dir = OutputArguments().output_dir
+        output_dir = ResultsArguments().output_dir
         time_ = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
         plot_output_dir = os.path.join(output_dir, f"{data_args.feature_extract_dir_name}_{time_}")
         os.makedirs(plot_output_dir, exist_ok=True)

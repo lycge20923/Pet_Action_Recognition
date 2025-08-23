@@ -298,7 +298,7 @@ class TD_GCN(nn.Module):
 
         self.num_classes = model_params.num_classes
         self.num_nodes = data_params.num_nodes
-        self.data_bn = nn.BatchNorm1d(num_person * data_params.num_coords * self.num_nodes)
+        self.data_bn = nn.BatchNorm1d(num_person * model_params.in_channels * self.num_nodes)
         
         block_confs = {
             1: dict(in_c=model_params.in_channels,      out_c=model_params.base_channels,      stride=1),

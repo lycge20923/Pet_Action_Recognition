@@ -87,12 +87,12 @@ This project aims to recognize and classify various actions performed by pets (i
 ### Training
 * Finally, we could start to train. To utilize ```wandb``` to help us to find the best parameters, please follow the below steps: 
 
-    1. Go check ```src/utils/cli_args.py``` to see the default values. If you want to change the values, it is recommended not to directly modify the values in it. Instead, you should write a config file like any files in ```configs```, and specify which parameters you want to change. For example, to disable ```add_optical_flow```, you could write:
+    1. Go check ```src/utils/cli_args.py``` to see the default values. If you want to change the values, it is recommended not to directly modify the values in it. Instead, you should write a config file like any files in ```configs```, and specify which parameters you want to change. For example, to disable ```add_contrastive_loss```, you could write:
 
         ```
         ...
         parameters:
-          batch_size: # this is the parameters you want to change
+          add_contrastive_loss: # this is the parameters you want to change
             values: [False] # or you could specifiy multiple values like [True, False]
         ```
 

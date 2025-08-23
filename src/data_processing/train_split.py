@@ -3,6 +3,7 @@ import json
 import logging
 import numpy as np
 import random
+import gc
 from tqdm import tqdm
 from collections import defaultdict, Counter
 
@@ -11,6 +12,90 @@ from sklearn.model_selection import StratifiedGroupKFold
 from ..utils.cli_args import DataArguments
 from ..utils.logging_utils import setup_logger
 
+
+def build_source_action_vectors(all_samples):
+    """
+    sources:  sorted source list
+    actions:  sorted action list
+    src2vec:  dict[src] -> np.array([A]), window counts of each action
+    total:    total action vectors
+    """
+    sources = sorted({s['source_video_id'] for s in all_samples})
+    actions = sorted({s['action_id'] for s in all_samples})
+    A = len(actions)
+    act2idx = {a:i for i,a in enumerate(actions)}
+
+    per_sa = defaultdict(int)
+    for s in all_samples:
+        per_sa[(s['source_video_id'], s['action_id'])] += 1
+
+    src2vec = {}
+    for src in sources:
+        v = np.zeros(A, dtype=int)
+        for a in actions:
+            v[act2idx[a]] = per_sa[(src, a)]
+        src2vec[src] = v
+
+    total = np.zeros(A, dtype=int)
+    for v in src2vec.values():
+        total += v
+    return sources, actions, src2vec, total
+
+def assign_sources_to_folds_balanced(sources, src2vec, total, K=5, seed=42, coverage_bonus=1.0):
+    """
+    Group-aware multi-class stratification with a global L1-deviation objective, 
+    plus a coverage bonus for assignments that fill classes missing in a fold.
+    - Objective: minimize  sum_j ||fold_j - target||_1
+    - Coverage bonus:
+    if assigning a source to a fold introduces any class that currently has zero count in that fold, 
+    decrease the score (i.e., make that assignment more favorable).
+    - Guarantee: ensure every fold receives at least one source; 
+    if any fold is left empty, perform a one-time rebalancing/shift from the most overloaded fold.
+    """
+    rng = np.random.default_rng(seed)
+    target = total.astype(float) / float(K)
+    folds = [np.zeros_like(target, dtype=float) for _ in range(K)]
+    assign = {}
+
+    # First deal with "big" source
+    src_order = sorted(sources, key=lambda s: src2vec[s].sum(), reverse=True)
+
+    for s in src_order:
+        v = src2vec[s].astype(float)
+        best_k, best_score = None, None
+        for k in range(K):
+            old = folds[k].copy()
+            before = np.abs(old - target).sum()
+            after  = np.abs((old + v) - target).sum()
+            delta  = after - before  # put s into k, enlarge L1 bigger(but make it smaller is better)
+
+            # coverage
+            new_covered = int(((old == 0) & (v > 0)).sum())
+            score = delta - coverage_bonus * new_covered
+
+            # break even
+            if (best_score is None) or (score < best_score) or (np.isclose(score, best_score) and rng.random() < 0.5):
+                best_score, best_k = score, k
+
+        folds[best_k] += v
+        assign[s] = best_k
+
+    # Ensure every fold is used: 
+    # if any fold is empty, move the smallest source from the most overloaded fold to that fold.
+    used = set(assign.values())
+    if len(used) < K:
+        empties = [k for k in range(K) if k not in used]
+        for k in empties:
+            # Select a donor: the fold that currently has the largest L1 deviation.
+            donor = max(range(K), key=lambda j: np.abs(folds[j] - target).sum())
+            cand = [s for s, jj in assign.items() if jj == donor]
+            # Move the source with the smallest total count to minimize disruption.
+            s_move = min(cand, key=lambda s: src2vec[s].sum())
+            folds[donor] -= src2vec[s_move]
+            folds[k]     += src2vec[s_move]
+            assign[s_move] = k
+
+    return assign
 
 def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir):
     """
@@ -24,6 +109,9 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
         kps = data["keypoints"]
         ofs = data["optical_flows"]
         n_windows = kps.shape[0] // window_size
+        
+        kp_buf = np.empty((num_samples, *kps.shape[1:]), dtype=kps.dtype)
+        of_buf = np.empty((num_samples, *ofs.shape[1:]), dtype=ofs.dtype)
 
         for w in range(n_windows):
             idxs = np.linspace(
@@ -32,6 +120,7 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
                 num_samples,
                 dtype=int
             )
+            '''
             kp_s = kps[idxs]
             of_s = ofs[idxs]
 
@@ -50,6 +139,28 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
                 "action_id":        ann["action_id"],
                 "window_index":     w
             })
+            '''
+            
+            np.take(kps, idxs, axis=0, out=kp_buf)
+            np.take(ofs, idxs, axis=0, out=of_buf)
+            
+            kp_feat_path = os.path.join(np_save_dir, f"{sample_id:06d}_kp.npy")
+            of_feat_path = os.path.join(np_save_dir, f"{sample_id:06d}_of.npy")
+            
+            np.save(kp_feat_path, kp_buf)
+            np.save(of_feat_path, of_buf)
+            
+            all_meta.append({
+                "sample_id":        sample_id,
+                "kp_feature_file":     kp_feat_path,
+                "of_feature_file": of_feat_path, 
+                "video_name":       ann["video_name"],
+                "source_video_id":  ann["source_video_id"],
+                "action_id":        ann["action_id"],
+                "window_index":     w
+            })
+            
+            
             sample_id += 1
 
         del data, kps, ofs
@@ -69,7 +180,7 @@ def main():
     args = DataArguments()
     base = os.path.splitext(args.annotation_file_name)[0]
     out_dir = os.path.join(args.data_dir, args.trainsplit_dir_name)
-    np_save_dir = os.path.join(out_dir, "npz")
+    np_save_dir = os.path.join(out_dir, "npy")
     os.makedirs(np_save_dir, exist_ok=True)
 
     # load and filter clip-level annotations
@@ -101,69 +212,37 @@ def main():
     #     json.dump(all_samples, f)  
      
     logger.info(f"Saved {len(all_samples)} window samples (.npz)")
-
-    # 2) one-time StratifiedGroupKFold on source -> fold map
-    sources = sorted({s['source_video_id'] for s in all_samples})
-    # label each source by how many distinct actions it has
-    src_labels = [
-        len({s['action_id'] for s in all_samples if s['source_video_id'] == src})
-        for src in sources
-    ]
-    sgkf = StratifiedGroupKFold(n_splits=args.num_folds, shuffle=True, random_state=42)
-    source2fold = {}
-    for fold, (_, val_idx) in enumerate(sgkf.split(sources, src_labels, groups=sources)):
-        for idx in val_idx:
-            source2fold[sources[idx]] = fold
-
-    # 3) build per-(action, source) queues
-    queues = defaultdict(lambda: defaultdict(list))
-    for s in all_samples:
-        queues[s['action_id']][s['source_video_id']].append(s)
-    # sort each queue by sample_id
-    for act, src_dict in queues.items():
-        for src, lst in src_dict.items():
-            random.shuffle(lst)
-
-    # 4) round-robin sampling until difference > allow_diff
-    allow_diff = getattr(args, 'fold_allow_diff', 0)
-    counts = Counter({act: 0 for act in queues})
+    
+    # 2) Group-aware multi-class stratification on sources -> fold map（修正版）
+    sources, actions, src2vec, total = build_source_action_vectors(all_samples)
+    source2fold = assign_sources_to_folds_balanced(
+        sources, src2vec, total, K=args.num_folds, seed=42, coverage_bonus=1.0
+    )
+    
     final_samples = []
-    round_k = 1
-    while True:
-        round_samples = []
-        for act, src_dict in queues.items():
-            for src, lst in src_dict.items():
-                if len(lst) >= round_k:
-                    samp = lst[round_k-1].copy()
-                    samp['fold'] = source2fold[src]
-                    round_samples.append(samp)
-        if not round_samples:
-            break
-        # compute prospective counts
-        temp_counts = counts.copy()
-        for s in round_samples:
-            temp_counts[s['action_id']] += 1
-        # stop if difference exceeds threshold
-        if max(temp_counts.values()) - min(temp_counts.values()) > allow_diff:
-            break
-        # accept this round
-        final_samples.extend(round_samples)
-        counts = temp_counts
-        round_k += 1
-
-    # log per-fold class distribution
+    for s in all_samples:
+        item = s.copy()
+        item['fold'] = source2fold[s['source_video_id']]
+        final_samples.append(item)
+    
+    # for logging
+    fold_srcs = defaultdict(list)
+    for src, f in source2fold.items():
+        fold_srcs[f].append(src)
+    
     for fold in range(args.num_folds):
         cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
-        sorted_cnt = {action: cnt[action] for action in sorted(cnt)}
-        logger.info(f"[Fold {fold}] samples per action: {sorted_cnt}")
-
-
+        sorted_cnt = {a: cnt.get(a,0) for a in sorted({s['action_id'] for s in all_samples})}
+        n_src = len(fold_srcs.get(fold, []))
+        n_samp = sum(sorted_cnt.values())
+        logger.info(f"[Fold {fold}] #sources={n_src}, #samples={n_samp}, per-action={sorted_cnt}")
+        
     # save final metadata
     meta_fp = os.path.join(out_dir, f"{base}_windows_metadata.json")
     with open(meta_fp, 'w') as f:
         json.dump(final_samples, f, indent=2)
     logger.info(
-        f"Generated {len(final_samples)} round-robin balanced samples (allow_diff={allow_diff})"
+        f"Generated {len(final_samples)} samples."
     )
 
 if __name__ == '__main__':

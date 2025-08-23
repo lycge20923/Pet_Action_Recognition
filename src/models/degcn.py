@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from .gcn.tools import *
 from .gcn.graph import Graph
-from .gcn.new_modules import FlowAdjacency, NodeAttention
+from .gcn.new_modules import FlowAdjacencyModule
 from ..utils.cli_args import ModelArguments, DataArguments
 
 LEAKY_ALPHA = 0.1
@@ -45,8 +45,7 @@ class ST_GC(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels * self.Nh, 1) 
         self.bn = nn.BatchNorm2d(out_channels)
 
-    # def forward(self, x):
-    def forward(self, x, keypoints=None, flow_map=None):
+    def forward(self, x, flow_map=None):
         N, C, T, V = x.size() # 32, 3, 32, 17
         v = self.conv(x).view(N, self.Nh, -1, T, V) # N, out_channels*Nf, T, 17 -> N, Nf, output_channels, T, V) 
         weights = self.A.to(v.dtype)
@@ -83,20 +82,17 @@ class CTR_GC(nn.Module):
         self.conv4 = nn.Conv2d(rel_channels * self.Nh, out_channels * self.Nh, 1, groups=num_scale * self.Nh)
         
         self.alpha = nn.Parameter(torch.zeros(1))
+        self.beta = nn.Parameter(torch.zeros(1))
         self.bn = nn.BatchNorm2d(out_channels)
     
         self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         
-        # self.flow_adj = FlowAdjacency(num_nodes=num_nodes,
-        #                               patch_size=5,
-        #                               hidden_dim=16)
         self.flow_adj = flow_adj
         if self.flow_adj:
-            self.flow_adj = FlowAdjacency(num_nodes=num_nodes, patch_size=5, hidden_dims=[16, 32, 16])
+            self.flow_adj = FlowAdjacencyModule(num_nodes=num_nodes, patch_size=5, hidden_dims=[16, 32, 16])
 
-    # def forward(self, x, A=None, alpha=1):
-    def forward(self, x, keypoints=None, flow_seq=None, alpha=1.0, beta=1.0):
+    def forward(self, x, flow_map=None):
         N, C, T, V = x.size()
         res = x
         
@@ -110,44 +106,22 @@ class CTR_GC(nn.Module):
         tanh: each element maps to (-1, 1)
         weights: (N, ) -> (N, 4, nh, , V, V)
         '''
-        weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)       
+        weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)    
         
         # weights = weights * self.alpha.to(weights.dtype) + self.A.view(1, 1, self.Nh, 1, V, V).to(weights.dtype)
         A_flow = None
-        if self.flow_adj and (keypoints is not None) and (flow_seq is not None):
-            A_flow = self.flow_adj(flow_seq, keypoints)  # (N, V, V)
+        if self.flow_adj and (flow_map is not None):
+            A_flow = self.flow_adj(flow_map)  # (N, V, V)
             Af = A_flow.unsqueeze(1).expand(-1, self.Nh, -1, -1) 
-            A_dyn = (beta * Af).unsqueeze(1).unsqueeze(3)
+            A_dyn = Af.unsqueeze(1).unsqueeze(3)
             A_dyn = A_dyn.to(weights.dtype).to(weights.device)
         else:
             A_dyn = 0
         dtype = weights.dtype
         device = weights.device
         
-        # test
-        with torch.no_grad():
-            import json
-            stats = {
-                "self.A_min":  self.A.min().item(),
-                "self.A_max":  self.A.max().item(),
-                "self.A_mean": self.A.mean().item(),
-                "self.A_std":  self.A.std().item(),
-                "weights_min":  weights.min().item(),
-                "weights_max":  weights.max().item(),
-                "weights_mean": weights.mean().item(),
-                "weights_std":  weights.std().item(),
-                }
-            if A_flow is not None:
-                stats["A_flow_min"] = A_flow.min().item()
-                stats["A_flow_max"] = A_flow.max().item()
-                stats["A_flow_mean"] = A_flow.mean().item()
-                stats["A_flow_std"] = A_flow.std().item()
-            with open('supervise_A.json', 'w', encoding='utf-8') as f:
-                 json.dump(stats, f, ensure_ascii=False, indent=4)
-        
-        A_static = (alpha * self.A).view(1,1,self.Nh,1,V,V).to(dtype).to(device)
-        weights = weights * self.alpha.to(dtype) + A_static + A_dyn
-            
+        A_static = self.A.view(1,1,self.Nh,1,V,V).to(dtype).to(device)
+        weights = weights * self.alpha.to(dtype) + A_static + A_dyn * self.beta.to(dtype)
         x = torch.einsum('ngacvu, ngactu->ngctv', weights, v).contiguous().view(N, -1, T, V)
         x = self.bn(x)
         return x
@@ -253,14 +227,14 @@ class MultiScale_TemporalModeling(nn.Module):
     
 class Basic_Block(nn.Module):
     def __init__(self, in_channels, out_channels, A, k, eta, kernel_size=5, stride=1, dilations=2, 
-                 num_frame=64, num_joint=25, residual=True, flow_adj=False, node_attention=False):
+                 num_frame=64, num_joint=25, residual=True, flow_adj=False, start_ch = 3):
         super(Basic_Block, self).__init__()
         
         num_scale = 4
         # scale_channels = out_channels // num_scale
-        self.num_scale = num_scale if in_channels !=3 else 1
+        self.num_scale = num_scale if in_channels != start_ch else 1
         
-        if in_channels == 3:
+        if in_channels == start_ch:
             self.gcn = ST_GC(in_channels, out_channels, A)
         else:
             self.gcn = CTR_GC(in_channels, 
@@ -289,46 +263,16 @@ class Basic_Block(nn.Module):
         
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         init_param(self.modules())
-        
-        # for node attentions
-        self.node_attention = node_attention
-        if node_attention:
-            self.node_att = NodeAttention(in_channels=out_channels, num_heads=4)
-            # self.node_att = NodeAttention(in_channels=out_channels, num_heads=4, A=A)
     
     # def forward(self, x):
-    def forward(self, x, keypoints=None, flow_map=None):
+    def forward(self, x, flow_map=None):
         res = x
-        x = self.gcn(x, keypoints, flow_map)
-        
-        # add node attentions
-        if self.node_attention: 
-            # print("x.shape", x.shape)
-            alpha = self.node_att(x)
-            
-            # test
-            with torch.no_grad():
-                import json
-                stats = {
-                    "alpha_min":  alpha.min().item(),
-                    "alpha_max":  alpha.max().item(),
-                    "alpha_mean": alpha.mean().item(),
-                    "alpha_std":  alpha.std().item()
-                    }
-                with open('supervise_node_attn.json', 'w', encoding='utf-8') as f:
-                    json.dump(stats, f, ensure_ascii=False, indent=4)
-            
-            # print("alpha:", alpha)
-            B, C, T, V = x.size()
-            alpha = alpha.view(B, 1, 1, V)
-            res1 = self.residual1(res)
-            gated = alpha * x + (1 - alpha) * res1
-            x = self.relu(gated)
-        else:
-            x = self.relu(x + self.residual1(res))
-        
+        x = self.gcn(x, flow_map)
+        x = self.relu(x + self.residual1(res))
         x = self.tcn(x)
-        x = self.relu(x + self.residual2(res))
+        x = x + self.residual2(res)            
+        x = self.relu(x)
+        
         return x
 
 
@@ -337,7 +281,7 @@ def bn_init(bn, scale):
     nn.init.constant_(bn.bias, 0)
 
 class DeGCN(nn.Module):
-    def __init__(self, block_args, A, k, eta, flow_adj, node_attention):
+    def __init__(self, block_args, A, k, eta, flow_adj):
         super().__init__()
         self.blocks = nn.ModuleList([
             Basic_Block(
@@ -346,16 +290,16 @@ class DeGCN(nn.Module):
                 num_frame=num_frame,
                 num_joint=num_joint,
                 residual=residual,
-                node_attention=node_attention,
-                flow_adj=flow_adj
+                flow_adj=flow_adj,
+                start_ch = start_ch
             )
-            for in_ch, out_ch, stride, residual, num_frame, num_joint in block_args
+            for in_ch, out_ch, stride, residual, num_frame, num_joint, start_ch in block_args
         ])
 
-    def forward(self, x, keypoints=None, flow_seq=None):
+    def forward(self, x, flow_map=None):
         # x: (N*M, C, T, V)
         for block in self.blocks:
-            x = block(x, keypoints, flow_seq)
+            x = block(x, flow_map)
         return x
 
 class DE_GCN(nn.Module):
@@ -366,26 +310,26 @@ class DE_GCN(nn.Module):
         self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
         A = self.graph.A  # (3, V, V)
         
-        self.data_bn = nn.BatchNorm1d(num_person * data_params.num_coords * data_params.num_nodes)
+        self.data_bn = nn.BatchNorm1d(num_person * model_params.in_channels * data_params.num_nodes)
         bn_init(self.data_bn, 1)
         
         block_list = [
-            [model_params.in_channels, model_params.base_channels, 1, False, data_params.num_samples, data_params.num_nodes],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes],
-            [model_params.base_channels, model_params.base_channels * 2, 2, True, data_params.num_samples, data_params.num_nodes],
-            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes],
-            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes],
-            [model_params.base_channels * 2, model_params.base_channels * 4, 2, True, data_params.num_samples // 2, data_params.num_nodes],
-            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes],
-            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes]
+            [model_params.in_channels, model_params.base_channels, 1, False, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels, model_params.base_channels * 2, 2, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels * 2, model_params.base_channels * 4, 2, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels],
+            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels]
         ]
         self.blockargs = [block_list[int(i - 1)] for i in model_params.gcn_include_blocks]
 
         self.num_stream = model_params.degcn_num_streams
         self.streams = nn.ModuleList([
-            DeGCN(self.blockargs, A, k, eta, flow_adj=model_params.degcn_add_of_A, node_attention=model_params.degcn_add_node_attention) for _ in range(self.num_stream)
+            DeGCN(self.blockargs, A, k, eta, flow_adj=model_params.add_flow_adjacency) for _ in range(self.num_stream)
         ])
         self.fc = nn.ModuleList([
             nn.Linear(model_params.base_channels*4, model_params.num_classes) for _ in range(self.num_stream)
@@ -396,12 +340,105 @@ class DE_GCN(nn.Module):
             self.drop_out = nn.Dropout(drop_out)
         else:
             self.drop_out = lambda x: x
+        
+        self.add_flow_coords = model_params.add_flow_coords
+        self.add_flow_adjacency = model_params.add_flow_adjacency
+        self.in_channels = model_params.in_channels
+    
+    def local_flow_stats(self, keypoints: torch.Tensor,
+                        optical_flows: torch.Tensor,
+                        block_size: int = 5):
+        """
+        Args:
+            keypoints:      (B, 3, T, J) – normalized (x, y, conf), but x/y may be outside [0,1].
+                            If [x,y,conf] == [0,0,0], treat as missing and skip.
+            optical_flows:  (B, 2, T, H, W) – flow u/v.
+            block_size:     int – patch side length.
 
-    # def forward(self, x):
-    def forward(self, x, flow_map=None):
+        Returns:
+            features: (B, T, J, 4) – (mean_u, mean_v, std_u, std_v).
+        """
+        
+        B, _, T, J = keypoints.shape
+        _, _, _, H, W = optical_flows.shape
+        
+        device = optical_flows.device
+        dtype  = optical_flows.dtype
+
+        ps   = block_size
+        half = block_size // 2  # 與你給的名稱一致
+        r    = half
+        P    = ps * ps
+
+        # 1) 取出 x,y,conf 並轉成像素座標（從 normalized → pixels）
+        #    若你的 x,y 原本已是像素座標，可把兩行縮放改成 x_pix = x, y_pix = y。
+        x   = keypoints[:, 0, ...].to(dtype=dtype, device=device)     # (B, T, J)
+        y   = keypoints[:, 1, ...].to(dtype=dtype, device=device)     # (B, T, J)
+        conf= keypoints[:, 2, ...].to(dtype=dtype, device=device)     # (B, T, J)
+
+        x_pix = x * (W - 1)
+        y_pix = y * (H - 1)
+
+        # 2) 取整數中心（模擬原本硬切）
+        cx = x_pix.round()                                         # (B, T, J)
+        cy = y_pix.round()                                         # (B, T, J)
+
+        # 3) 建 ps×ps 偏移網格（像素座標）
+        base_y, base_x = torch.meshgrid(
+            torch.arange(-r, r + 1, device=device, dtype=dtype),
+            torch.arange(-r, r + 1, device=device, dtype=dtype),
+            indexing="ij"
+        )                                                          # (ps, ps)
+        base = torch.stack([base_x, base_y], dim=-1)               # (ps, ps, 2)
+
+        # 4) 組成每個關節的像素座標網格 (B,T,J,ps,ps,2)
+        grid_pix = base.view(1, 1, 1, ps, ps, 2).expand(B, T, J, ps, ps, 2).clone()
+        grid_pix[..., 0] = grid_pix[..., 0] + cx.unsqueeze(-1).unsqueeze(-1)  # x
+        grid_pix[..., 1] = grid_pix[..., 1] + cy.unsqueeze(-1).unsqueeze(-1)  # y
+
+        # 5) 像素座標 → [-1,1]（給 grid_sample）
+        grid = grid_pix.clone()
+        grid[..., 0] = 2.0 * (grid_pix[..., 0] / (W - 1)) - 1.0
+        grid[..., 1] = 2.0 * (grid_pix[..., 1] / (H - 1)) - 1.0
+        grid = grid.view(B * T * J, ps, ps, 2)                     # (BTJ, ps, ps, 2)
+
+        # 6) 準備 flow，展平成 (BTJ, 2, H, W)
+        #    optical_flows: (B, 2, T, H, W) → (B, T, 2, H, W) → (B*T, 2, H, W)
+        flow_bt = optical_flows.permute(0, 2, 1, 3, 4).contiguous().view(B * T, 2, H, W)
+        flow_rep = flow_bt.unsqueeze(1).expand(B * T, J, 2, H, W).reshape(B * T * J, 2, H, W)
+
+        # 7) 取樣（nearest + border 貼近原邏輯；若要亞像素平滑可改 mode='bilinear'）
+        patches = F.grid_sample(
+            flow_rep, grid,
+            mode='nearest',
+            padding_mode='border',
+            align_corners=False
+        )  # (BTJ, 2, ps, ps)
+
+        # 8) 統計 (mean_u, mean_v, std_u, std_v)
+        patches = patches.view(B, T, J, 2, P)                      # (B,T,J,2,P)
+        mu     = patches.mean(dim=-1)                              # (B,T,J,2)
+        sigma  = patches.std(dim=-1, unbiased=False)               # (B,T,J,2)
+        stats  = torch.cat([mu, sigma], dim=-1)                    # (B,T,J,4)
+
+        # 9) 遮罩：若 [x,y,conf]==[0,0,0] 或 conf==0，該點設 0
+        zero_xyc = ((x == 0) & (y == 0) & (conf == 0)).to(dtype)   # (B,T,J)
+        valid    = ((conf > 0).to(dtype) * (1.0 - zero_xyc)).unsqueeze(-1)  # (B,T,J,1)
+        stats    = stats * valid
+
+        # 10) 回傳 (B, T, J, 4)
+        return stats
+
+    def forward(self, x, optical_flows=None):
         keypoints = x.detach().clone()
+        flow_map = None
+        if (self.add_flow_coords or self.add_flow_adjacency) and optical_flows is not None:
+            flow_map = self.local_flow_stats(keypoints, optical_flows)
+            if self.add_flow_coords:
+                x = torch.cat([keypoints[:, :2, ...], flow_map.permute(0, 3, 1, 2)], axis=1)
+        
         # Input reshape and batchnorm
-        if x.dim() == 3:
+        if x.dim() == self.in_channels:
             N, T, VC = x.shape
             x = x.view(N, T, self.num_point, -1)
             x = x.permute(0, 3, 1, 2).contiguous().unsqueeze(-1)
@@ -415,18 +452,17 @@ class DE_GCN(nn.Module):
         # Multi-stream processing and pooling
         feats, logits_list = [], []
         for stream, fc in zip(self.streams, self.fc):
-            if flow_map is not None:
-                x_s = stream(x_, keypoints, flow_map) 
+            if self.add_flow_adjacency is not None:
+                x_s = stream(x_, flow_map) 
             else:
                 x_s = stream(x_) # (N*M, C', T', V')
             c_new = x_s.size(1)
-            # Pool over time & joints
-            x_pooled = x_s.view(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
+            x_pooled = x_s.reshape(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
             x_d = self.drop_out(x_pooled)
             logits = fc(x_d)                   # (N, num_class)
             feats.append(x_pooled)
             logits_list.append(logits)
-
+            
         # Average across streams
         feat = torch.stack(feats, dim=0).mean(dim=0)         # (N, C')
         logits = torch.stack(logits_list, dim=0).mean(dim=0) # (N, num_class)
@@ -434,5 +470,3 @@ class DE_GCN(nn.Module):
 
 if __name__ == "__main__":
     pass
-    # model = MambaBlock(d_model=4)
-    # print(model)
