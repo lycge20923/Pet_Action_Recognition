@@ -10,7 +10,7 @@ parameters:
   fold_num:
     values: [0]
   epochs:
-    values: [3000]
+    values: [1000]
   batch_size:
     values: [32]
   add_I3D_branch:
