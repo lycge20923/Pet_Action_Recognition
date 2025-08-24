@@ -9,7 +9,7 @@ parameters:
   exec_name: # change to easily identify
     values: ["formal:gcn"]
   epochs:
-    values: [1000]
+    values: [2000]
   batch_size:
     values: [32]
   add_I3D_branch:
