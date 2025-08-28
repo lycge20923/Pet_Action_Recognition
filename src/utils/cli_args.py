@@ -162,10 +162,21 @@ class ModelArguments:
         default=True,
         metadata={"help":"Delete confidence, and extend optical flow information (m_x, m_y, std_x, std_y) for gcn"}
     )
+    flow_statistic_mode: Literal["mean+max", "mean"] = field(
+        default="mean+max",
+        metadata={"help":"What kinds of statistic for sending the flow information."}
+    )
+    flow_block_size:int = field(
+        default=5,
+        metadata={"help":"The patch size of the flow for each keypoints"}
+    )
     @property
     def in_channels(self) -> int:
         if self.add_flow_coords:
-            return 6
+            if self.flow_statistic_mode == "mean+max": 
+                return 6
+            else:
+                return 4
         return self._num_coords
     base_channels: int = field(
         default=64, 

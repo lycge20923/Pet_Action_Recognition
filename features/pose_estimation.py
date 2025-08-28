@@ -72,6 +72,7 @@ class PoseEstimationModel():
         total_time = 0
         keypoints, bboxes_list = [], []
         predict_count = 0
+        pred_frames = []
         for (ith, img) in tqdm(enumerate(reader), total=total_frames):
             t0 = time.time()
             
@@ -88,6 +89,7 @@ class PoseEstimationModel():
                 img = self.model.draw(False, False, plot_threshold)[..., ::-1]
                 if is_video:
                     out_writer.write(img)
+                    pred_frames.append(img)
                 else:
                     cv2.imwrite(plot_path, img)
         if plot_path is not None:
@@ -97,7 +99,7 @@ class PoseEstimationModel():
         avg_predict_success = predict_count / (ith + 1)
         
         # final
-        return {"keypoints": keypoints, "bboxes": bboxes_list, "stat":{"exec_fps": exec_fps, "keypoint_detection_rate": avg_predict_success}}
+        return {"keypoints": keypoints, "bboxes": bboxes_list, "stat":{"exec_fps": exec_fps, "keypoint_detection_rate": avg_predict_success}, "pred_frames":pred_frames}
 
 
 import cv2

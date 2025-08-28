@@ -7,6 +7,8 @@ from torch.utils.data import Dataset
 import numpy as np
 import cv2
 import time
+from tqdm import tqdm
+import gc
 
 from ..utils.cli_args import DataArguments, ModelArguments, AugmentationArguments
 from .aug_func import *
@@ -17,7 +19,9 @@ class KpOfDataset(Dataset):
                  aug_params: AugmentationArguments,
                  model_params: ModelArguments,
                  istrain: bool = True,
-                 fold_num: int = 0):
+                 fold_num: int = 0,
+                 data_seg_num: int = 6
+                 ):
         super().__init__()
         self.data_params = data_params
         self.aug_params = aug_params
@@ -36,7 +40,36 @@ class KpOfDataset(Dataset):
             self.annotations = [sample for sample in self.annotations if sample['fold'] != fold_num]
         else:
             self.annotations = [sample for sample in self.annotations if sample['fold'] == fold_num]
-            
+        
+        # trial loading complete at first time
+        self.data_seg_num = data_seg_num
+        for i in range(data_seg_num):
+            setattr(self, f"dataset_{str(i)}", [])
+        # self.dataset = []
+        for idx, annotation in tqdm(enumerate(self.annotations), total=len(self.annotations)):
+            sample = dict()
+            # feat_path = annotation["feature_file"]
+            # data = np.load(feat_path)
+            if self.kps_and_flow or self.only_flow:
+                optical_flows_np = np.load(annotation["of_feature_file"])
+                # optical_flows_np = data["optical_flows"]
+                optical_flows_np = optical_flows_np.squeeze(axis=1) # T, 2, H, W
+                optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3) # 2, T, H, W
+                sample["optical_flows_np"] = optical_flows_np
+                
+            if not self.only_flow:
+                # keypoints_np = data["keypoints"].astype(np.float32, copy=False)   # shape (T, V, 3)
+                keypoints_np = np.load(annotation["kp_feature_file"]).astype(np.float32, copy=False)
+                sample["keypoints_np"] = keypoints_np
+            sample["video_name"] = annotation["video_name"]
+            # self.dataset.append(sample)
+            getattr(self, f"dataset_{str(idx % data_seg_num)}").append(sample)
+        if self.kps_and_flow or self.only_flow:
+            del optical_flows_np
+        if not self.only_flow:
+            del keypoints_np 
+        gc.collect()    
+    
     def __len__(self):
         return len(self.annotations)
 
@@ -44,7 +77,7 @@ class KpOfDataset(Dataset):
         # Load initial data from annotations
         # And 'action_id' is the label
         # load keypoints from the .npz window file
-        
+        '''
         feat_path = self.annotations[index]["feature_file"]
         video_name = self.annotations[index]["video_name"]
         data = np.load(feat_path)
@@ -62,6 +95,7 @@ class KpOfDataset(Dataset):
             keypoints_np = None 
         
         '''
+        '''
         kp_feature_path = self.annotations[index]["kp_feature_file"]
         of_feature_path = self.annotations[index]["of_feature_file"]
         video_name = self.annotations[index]["video_name"]
@@ -78,6 +112,12 @@ class KpOfDataset(Dataset):
         else:
             keypoints_np = None 
         '''
+        
+        # trial loading complete at first time
+        sample = getattr(self, f"dataset_{str(index % self.data_seg_num)}")[index // self.data_seg_num]
+        optical_flows_np = sample["optical_flows_np"] if (self.kps_and_flow or self.only_flow) else None
+        keypoints_np = sample["keypoints_np"] if (not self.only_flow) else None
+        video_name = sample["video_name"]
         
         # --- augmentation --- 
         if self.aug_params.augment and self.datatype == "train":

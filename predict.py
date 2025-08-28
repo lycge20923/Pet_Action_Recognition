@@ -15,6 +15,8 @@ import torch
 import torch.nn.functional as F
 import json
 import yaml
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from src.utils.logging_utils import setup_logger
 from src.utils.cli_args import DataArguments, ModelArguments, ResultsArguments, PoseEstimationArguments, OpticalFlowArguments, TrainingArguments
@@ -145,8 +147,10 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     os.makedirs(sample_dir, exist_ok=True)
     window_size = data_params.window_size
     n_windows = keypoints_arr.shape[0] // window_size 
+    sample_last_ids = [] # for visualizing
     for index, w in enumerate(range(n_windows)):
         idxs = np.linspace(w * window_size, (w + 1) * window_size - 1, data_params.num_samples, dtype=int)
+        sample_last_ids.append(idxs[-1])
         kp_s = keypoints_arr[idxs].astype(np.float32)
         of_s = flows_arr[idxs].astype(np.float32)
         fn = os.path.join(sample_dir, f"{index:04d}.npz")
@@ -164,20 +168,141 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     logger.info(f"Loaded checkpoint {checkpoint_path}")
     window_results = []
     actions = data_params.actions
+    if model_params.add_flow_adjacency or model_params.add_flow_coords:
+        flow_maps = []
+    if model_params.add_flow_adjacency:
+        last_A_flows = []
     with torch.no_grad():
         for fn in samples:
             data = np.load(fn)
             kps = torch.from_numpy(data["keypoints"]).permute(2,0,1).unsqueeze(0).to(device)  # (1,3,T,V)
             fl  = torch.from_numpy(data["optical_flows"]).squeeze(axis=1).permute(1, 0, 2, 3).unsqueeze(0).to(device)  # (1,2,T,H,W)
             
-            feat, logits = model(kps, fl)
+            feat, logits, last_A_flow, flow_map = model(kps, fl)
             prob = F.softmax(logits, dim=1)[0]
             pred = int(prob.argmax().cpu())
             window_results.append(pred)
             logger.info(f"{os.path.basename(fn)} → class {pred} (p={prob[pred]:.3f})")
+            
+            if model_params.add_flow_adjacency or model_params.add_flow_coords:
+                flow_maps.append(flow_map.squeeze())
+            if model_params.add_flow_adjacency:
+                last_A_flows.append(last_A_flow.squeeze())
+                
+    
+    # visualize prediction
+    predictions = [actions[i] for i in window_results]
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(os.path.join(output_dir, f"{base}_pred_vis.mp4"), fourcc, fps, (frame_width, frame_height))
+    sample_id = 0
+    
+    # try to detect gt
+    try:
+        gt_label = file_name.split("_")[1]
+    except:
+        gt_label = None
+        print("It is unclear about the ground-truth, so you have to check by yourself")
+    
+    interval = data_params.window_size // data_params.num_samples
+    for idx_, (frame, keypoints_, bbox_) in enumerate(zip(result_pe["pred_frames"], keypoints_all_frames, bbox_annotation)):
+        if isinstance(keypoints_, dict):
+            keypoints_ = list(keypoints_.items())  # [(id, array), ...]
+        else:
+            keypoints_ = list(enumerate(keypoints_))  # [(idx, array), ...]
+        
+        pred_label = predictions[sample_id]
+        
+        if gt_label is not None:
+            color = (0, 255, 0) if gt_label == pred_label else (0, 0, 255)
+        else:
+            color = (255, 0, 0)
+        
+        font_scale = 0.6
+        thickness = 2
+        (text_w, text_h), _ = cv2.getTextSize(pred_label, cv2.FONT_HERSHEY_SIMPLEX, fontScale=font_scale, thickness=2)
+        x_pos = frame_width - text_w - 10
+        y_pos = 20 + text_h
+        try:
+            cv2.putText(
+                frame,
+                pred_label,
+                (x_pos, y_pos),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+        except:
+            frame = np.ascontiguousarray(frame, dtype=np.uint8)
+            cv2.putText(
+                frame,
+                pred_label,
+                (x_pos, y_pos),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+
+        if len(keypoints_) == 1:
+            keypoints = keypoints_[0][1]
+            keypoints = [[round(ele[1]), round(ele[0])] for ele in keypoints]
+            if model_params.add_flow_adjacency or model_params.add_flow_coords:
+                velocity_info = flow_maps[sample_id][(idx_ % data_params.window_size) // interval].cpu().numpy()
+                
+            for kp_id, (x, y) in enumerate(keypoints):
+                mean_x, mean_y, std_x, std_y = velocity_info[kp_id].tolist() 
+                text_lines = [f"{kp_id}", f"{mean_x:.2f}", f"{mean_y:.2f}", f"{std_x:.2f}", f"{std_y:.2f}"]
+                cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)  # circle point
+                for i, line in enumerate(text_lines):
+                    cv2.putText(
+                        frame,
+                        line,
+                        (x + 3, y - 3 + i * 15), 
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.4,
+                        (0, 0, 255),
+                        1,
+                        cv2.LINE_AA
+                    )
+        
+        if bbox_ != []:
+            x_min, y_min, x_max, y_max = bbox_
+            x_min = max(1, min(x_min, frame_width - 1))
+            x_max = max(1, min(x_max, frame_width - 1))
+            y_min = max(1, min(y_min, frame_height - 1))
+            y_max = max(1, min(y_max, frame_height - 1))
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), color, 2)
+        
+        writer.write(frame)
+        if idx_ == sample_last_ids[sample_id]:
+            sample_id += 1
+            if sample_id >= len(sample_last_ids):
+                break
+    writer.release()
+    
+    if model_params.add_flow_adjacency:
+        subdir = os.path.join(output_dir, "flow_A_heatmaps")
+        os.makedirs(subdir, exist_ok=True)
+        for i, last_A_flow in enumerate(last_A_flows):
+            matrix = last_A_flow.squeeze().cpu().numpy()
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(matrix, cmap="coolwarm", annot=False, square=True, cbar=True)
+
+            plt.title("Heatmap of 17x17 Matrix")
+            plt.xlabel("Column Index")
+            plt.ylabel("Row Index")
+
+            # 存成檔案 (PNG/JPG/SVG 都可以)
+            plt.savefig(os.path.join(subdir, f"{base}_heatmap_{str(i + 1)}.png"), dpi=300, bbox_inches='tight')
+            plt.close()
+                        
+    
     result = {
         "video": base,
-        "window_predictions": [actions[i] for i in window_results]
+        "window_predictions": predictions
     }
     out_fp = os.path.join(output_dir, f"{base}_predict.json")
     with open(out_fp, 'w') as f:
