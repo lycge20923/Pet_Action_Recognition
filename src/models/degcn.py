@@ -63,7 +63,7 @@ class ST_GC(nn.Module):
     
 
 class CTR_GC(nn.Module):
-    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, flow_adj=False, flow_adj_start_dim=None): # 64*a, 64*b, (3, 17, 17), 4, 17
+    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, flow_adj=False, flow_statistic_dim=None): # 64*a, 64*b, (3, 17, 17), 4, 17
         super(CTR_GC, self).__init__()
 
         A = torch.from_numpy(A.astype(np.float32))
@@ -90,7 +90,7 @@ class CTR_GC(nn.Module):
         
         self.flow_adj = flow_adj
         if self.flow_adj:
-            self.flow_adj = FlowAdjacencyModule(num_nodes=num_nodes, start_dim=flow_adj_start_dim, patch_size=5, hidden_dims=[16, 32, 16])
+            self.flow_adj = FlowAdjacencyModule(num_nodes=num_nodes, flow_statistic_dim=flow_statistic_dim, patch_size=5, hidden_dims=[16, 32, 16])
 
     def forward(self, x, flow_map=None):
         N, C, T, V = x.size()
@@ -227,7 +227,7 @@ class MultiScale_TemporalModeling(nn.Module):
     
 class Basic_Block(nn.Module):
     def __init__(self, in_channels, out_channels, A, k, eta, kernel_size=5, stride=1, dilations=2, 
-                 num_frame=64, num_joint=25, residual=True, flow_adj=False, start_ch = 3):
+                 num_frame=64, num_joint=25, residual=True, flow_adj=False, start_ch = 3, flow_statistic_dim=None):
         super(Basic_Block, self).__init__()
         
         num_scale = 4
@@ -242,7 +242,7 @@ class Basic_Block(nn.Module):
                               A, 
                               self.num_scale,
                               flow_adj=flow_adj,
-                              flow_adj_start_dim=start_ch*2 - 4)
+                              flow_statistic_dim=flow_statistic_dim)
         self.tcn = MultiScale_TemporalModeling(out_channels, 
                                                out_channels, 
                                                eta,
@@ -292,9 +292,10 @@ class DeGCN(nn.Module):
                 num_joint=num_joint,
                 residual=residual,
                 flow_adj=flow_adj,
-                start_ch = start_ch
+                start_ch = start_ch,
+                flow_statistic_dim=flow_statistic_dim
             )
-            for in_ch, out_ch, stride, residual, num_frame, num_joint, start_ch in block_args
+            for in_ch, out_ch, stride, residual, num_frame, num_joint, start_ch, flow_statistic_dim in block_args
         ])
 
     def forward(self, x, flow_map=None):
@@ -315,16 +316,16 @@ class DE_GCN(nn.Module):
         bn_init(self.data_bn, 1)
         
         block_list = [
-            [model_params.in_channels, model_params.base_channels, 1, False, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels, model_params.base_channels * 2, 2, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels * 2, model_params.base_channels * 4, 2, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels],
-            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels]
+            [model_params.in_channels, model_params.base_channels, 1, False, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels, model_params.base_channels * 2, 2, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels * 2, model_params.base_channels * 4, 2, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
+            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim]
         ]
         self.blockargs = [block_list[int(i - 1)] for i in model_params.gcn_include_blocks]
 

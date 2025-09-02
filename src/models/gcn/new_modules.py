@@ -7,9 +7,9 @@ import torch.nn.functional as F
 
 class FlowAdjacencyModule(nn.Module):
     # def __init__(self, num_nodes, patch_size=5, hidden_dim=16):
-    def __init__(self, num_nodes, start_dim=4, patch_size=5, hidden_dims=[16]):
-        print(start_dim)
+    def __init__(self, num_nodes, flow_statistic_dim, patch_size=5, hidden_dims=[16]):
         super().__init__()
+        start_dim = flow_statistic_dim * 4
         self.V = num_nodes
         self.ps = patch_size
         self.pad = patch_size // 2
@@ -32,7 +32,6 @@ class FlowAdjacencyModule(nn.Module):
             A_flow: (B, V, V)  # Adjacency Matrix
         """
         B, T, V, C = flow_map.shape
-        print(B,T,V,C)
         # assert C == 4, f"flow_map last dim must be 4, got {C}"
 
         # 1) Build pairwise joint features (8-D)

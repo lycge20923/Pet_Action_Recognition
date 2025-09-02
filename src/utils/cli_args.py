@@ -158,28 +158,37 @@ class ModelArguments:
         default=3,
         metadata={"help": "The size of each coordination"}
     )
+    # for ablation study
     add_flow_coords: bool = field(
         default=True,
         metadata={"help":"Delete confidence, and extend optical flow information (m_x, m_y, std_x, std_y) for gcn"}
+    )
+    # for ablation study
+    add_flow_adjacency: bool = field(
+        default=True,
+        metadata={"help":"Whether add leanable adjacency matrix from optical flow in the architecture in DE-GCN"}
     )
     flow_statistic_mode: Literal["mean+max+std", "mean+max", "mean"] = field(
         default="mean+max+std",
         metadata={"help":"What kinds of statistic for sending the flow information."}
     )
-    flow_block_size:int = field(
+    flow_block_size: int = field(
         default=5,
         metadata={"help":"The patch size of the flow for each keypoints"}
     )
     @property
+    def flow_statistic_dim(self) -> int: 
+        if self.flow_statistic_mode == "mean+max+std":
+            return 3
+        elif self.flow_statistic_mode == "mean+max": 
+            return 2
+        else:
+            return 1
+    
+    @property
     def in_channels(self) -> int:
-        if self.add_flow_coords:
-            if self.flow_statistic_mode == "mean+max+std":
-                return 8
-            elif self.flow_statistic_mode == "mean+max": 
-                return 6
-            else:
-                return 4
-        return self._num_coords
+        return 2 + self.flow_statistic_dim * 2 if self.add_flow_coords else self._num_coords
+
     base_channels: int = field(
         default=64, 
         metadata={"help":"Base channel size in gcn."}
@@ -233,11 +242,6 @@ class ModelArguments:
     degcn_num_streams: int = field(
         default=2, 
         metadata= {"help": "The number of streams used in DE-GCN"}
-    )
-    # for ablation study
-    add_flow_adjacency: bool = field(
-        default=True,
-        metadata={"help":"Whether add leanable adjacency matrix from optical flow in the architecture in DE-GCN"}
     )
     load_gcn_weights: bool = field(
         default=False, 
