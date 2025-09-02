@@ -70,11 +70,11 @@ def rotate(
     else:
         center_norm = np.array([0.5, 0.5], dtype=np.float32)
     # rotate keypoints
+    angle_rad = np.deg2rad(angle)
+    cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
     if keypoints_np is not None:
         center, orig_shape, flat_xy, valid_mask = common_preprocess_for_augmentation(
             keypoints_np, valid_kpt_confidence_thresh)
-        angle_rad = np.deg2rad(angle)
-        cos_a, sin_a = np.cos(angle_rad), np.sin(angle_rad)
         R = np.array([[cos_a, -sin_a], [sin_a, cos_a]], dtype=np.float32)
         pts = flat_xy[valid_mask] - center
         pts_rot = pts @ R.T + center
@@ -177,11 +177,11 @@ def shear(
     """
     kps_out = keypoints_np
     flow_out = optical_flows_np
+    S = np.array([[1, sx], [sy, 1]], dtype=np.float32)
     if keypoints_np is not None:
         center_norm = get_center(keypoints_np, valid_kpt_confidence_thresh)
         center, orig_shape, flat_xy, valid_mask = common_preprocess_for_augmentation(
             keypoints_np, valid_kpt_confidence_thresh)
-        S = np.array([[1, sx], [sy, 1]], dtype=np.float32)
         pts = flat_xy[valid_mask] - center
         pts_sheared = pts @ S.T + center
         flat_xy[valid_mask] = pts_sheared

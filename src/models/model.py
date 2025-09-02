@@ -72,7 +72,7 @@ class ActionRecognitionModel(nn.Module):
             projected_flow_feat = self.flow_feature_projector(flow_feat)
             combined_feat = projected_flow_feat
             main_task_logits = self.final_classifier(combined_feat)
-            return combined_feat, main_task_logits
+            return combined_feat, main_task_logits, None, None
         
         # 2. at least use skeleton information
         skel_feat, _, last_flow_A, flow_map = self.skel_model(skeleton, flow)

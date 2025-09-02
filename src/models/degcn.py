@@ -63,7 +63,7 @@ class ST_GC(nn.Module):
     
 
 class CTR_GC(nn.Module):
-    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, flow_adj=False): # 64*a, 64*b, (3, 17, 17), 4, 17
+    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, flow_adj=False, flow_adj_start_dim=None): # 64*a, 64*b, (3, 17, 17), 4, 17
         super(CTR_GC, self).__init__()
 
         A = torch.from_numpy(A.astype(np.float32))
@@ -90,7 +90,7 @@ class CTR_GC(nn.Module):
         
         self.flow_adj = flow_adj
         if self.flow_adj:
-            self.flow_adj = FlowAdjacencyModule(num_nodes=num_nodes, patch_size=5, hidden_dims=[16, 32, 16])
+            self.flow_adj = FlowAdjacencyModule(num_nodes=num_nodes, start_dim=flow_adj_start_dim, patch_size=5, hidden_dims=[16, 32, 16])
 
     def forward(self, x, flow_map=None):
         N, C, T, V = x.size()
@@ -241,7 +241,8 @@ class Basic_Block(nn.Module):
                               out_channels, 
                               A, 
                               self.num_scale,
-                              flow_adj=flow_adj)
+                              flow_adj=flow_adj,
+                              flow_adj_start_dim=start_ch*2 - 4)
         self.tcn = MultiScale_TemporalModeling(out_channels, 
                                                out_channels, 
                                                eta,
@@ -425,10 +426,17 @@ class DE_GCN(nn.Module):
         mean_u = u.mean(dim=-1)                                    # (B,T,J)
         mean_v = v.mean(dim=-1)                                    # (B,T,J)
         
-        if flow_statistic_mode == "mean+max":
+        
+        
+        if flow_statistic_mode == "mean+max+std" or flow_statistic_mode == "mean+max":
             max_abs_u = u.abs().amax(dim=-1)                           # (B,T,J)
             max_abs_v = v.abs().amax(dim=-1)                           # (B,T,J)
-            stats = torch.stack([mean_u, mean_v, max_abs_u, max_abs_v], dim=-1)  # (B,T,J,4)
+            if flow_statistic_mode == "mean+max+std":
+                std_u = u.std(dim=-1, unbiased=False)                      # (B,T,J)
+                std_v = v.std(dim=-1, unbiased=False)                      # (B,T,J)
+                stats = torch.stack([mean_u, mean_v, max_abs_u, max_abs_v, std_u, std_v], dim=-1)  # (B,T,J,4)
+            else:
+                stats = torch.stack([mean_u, mean_v, max_abs_u, max_abs_v], dim=-1)  # (B,T,J,4)
         else:
             stats = torch.stack([mean_u, mean_v], dim=-1)  # (B,T,J,2)
 

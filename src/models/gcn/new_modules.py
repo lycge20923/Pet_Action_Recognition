@@ -7,13 +7,14 @@ import torch.nn.functional as F
 
 class FlowAdjacencyModule(nn.Module):
     # def __init__(self, num_nodes, patch_size=5, hidden_dim=16):
-    def __init__(self, num_nodes, patch_size=5, hidden_dims=[16]):
+    def __init__(self, num_nodes, start_dim=4, patch_size=5, hidden_dims=[16]):
+        print(start_dim)
         super().__init__()
         self.V = num_nodes
         self.ps = patch_size
         self.pad = patch_size // 2
         
-        dims = [8] + hidden_dims + [1]
+        dims = [start_dim] + hidden_dims + [1]
         layers = []
         for i in range(len(dims)-2):
             layers += [
@@ -26,20 +27,21 @@ class FlowAdjacencyModule(nn.Module):
     def forward(self, flow_map):
         """
         Args:
-            flow_map: (B, T, V, 4)  # (mean_u, mean_v, std_u, std_v) per joint per frame
+            flow_map: (B, T, V, C)  # C: (mean_u, mean_v, ...) per joint per frame
         Returns:
             A_flow: (B, V, V)  # Adjacency Matrix
         """
         B, T, V, C = flow_map.shape
-        assert C == 4, f"flow_map last dim must be 4, got {C}"
+        print(B,T,V,C)
+        # assert C == 4, f"flow_map last dim must be 4, got {C}"
 
         # 1) Build pairwise joint features (8-D)
-        Fi = flow_map.unsqueeze(3).expand(B, T, V, V, C)  # (B,T,V,V,4)
-        Fj = flow_map.unsqueeze(2).expand(B, T, V, V, C)  # (B,T,V,V,4)
-        pair_8d = torch.cat([Fi, Fj], dim=-1)             # (B,T,V,V,8)
+        Fi = flow_map.unsqueeze(3).expand(B, T, V, V, C)  # (B,T,V,V,C)
+        Fj = flow_map.unsqueeze(2).expand(B, T, V, V, C)  # (B,T,V,V,C)
+        pair_8d = torch.cat([Fi, Fj], dim=-1)             # (B,T,V,V,2*C)
 
         # 2) Feed into MLP
-        scores = self.mlp(pair_8d.reshape(B * T * V * V, 8))  # (B*T*V*V, 1)
+        scores = self.mlp(pair_8d.reshape(B * T * V * V, 2*C))  # (B*T*V*V, 1)
         scores = scores.view(B, T, V, V)                      # (B,T,V,V)
 
         # 3) Temporal aggregation (same as your original: average over T)
