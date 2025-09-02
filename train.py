@@ -189,6 +189,7 @@ def prepare_dataloaders(data_params:DataArguments,
 def build_model_and_optimizer(model_params:ModelArguments, 
                               data_params:DataArguments, 
                               train_params:TrainingArguments, 
+                              aug_params:AugmentationArguments,
                               coords,
                               class_weights=None):
     
@@ -201,7 +202,7 @@ def build_model_and_optimizer(model_params:ModelArguments,
     contrastive_loss = ContrastiveLoss()
     
     # set model
-    base_model = ActionRecognitionModel(model_params, data_params, coords)
+    base_model = ActionRecognitionModel(model_params, data_params, aug_params, coords)
     if not train_params.add_contrastive_loss:
         model = base_model
     else:
@@ -458,7 +459,7 @@ def main():
     class_weights = loaders["class_weights"]
     
     # set model, loss, optimizer, scheduler
-    train_objects = build_model_and_optimizer(model_params, data_params, train_params, coords, class_weights)
+    train_objects = build_model_and_optimizer(model_params, data_params, train_params, aug_params_train, coords, class_weights)
     model = train_objects["model"]
     cross_entropy_loss, contrastive_loss = train_objects["loss"]["cross entropy"], train_objects["loss"]["contrastive learning"]
     optimizer = train_objects["optimizer"]

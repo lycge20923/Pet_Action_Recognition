@@ -119,6 +119,7 @@ class KpOfDataset(Dataset):
         keypoints_np = sample["keypoints_np"] if (not self.only_flow) else None
         video_name = sample["video_name"]
         
+        '''
         # --- augmentation --- 
         if self.aug_params.augment and self.datatype == "train":
             # rotation
@@ -189,7 +190,7 @@ class KpOfDataset(Dataset):
                         self.aug_params.flow_blur_ksize,
                         self.aug_params.flow_blur_sigma
                     )
-            
+            '''
         # --- transform to tensor --- 
         # label
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)

@@ -8,13 +8,16 @@ from .stgcn import ST_GCN
 from .tdgcn import TD_GCN
 from .degcn import DE_GCN
 from .I3D import InceptionI3d
-from ..utils.cli_args import ModelArguments, DataArguments
+from ..utils.cli_args import ModelArguments, DataArguments, AugmentationArguments
 from ..utils.common import saving_self_training_best_gcn_weights_path
+
+from .augment import Augmentation
 
 class ActionRecognitionModel(nn.Module):
     def __init__(self, 
                  model_params:ModelArguments,
                  data_params:DataArguments,
+                 aug_params:AugmentationArguments,
                  coords):
         super().__init__()
         self.only_I3D_branch = model_params.only_I3D_branch
@@ -63,8 +66,12 @@ class ActionRecognitionModel(nn.Module):
         if (self.add_I3D_branch or self.only_I3D_branch) and self.I3D is not None:
             self.total_feature_dimension += self._projected_flow_feat_dim
         self.final_classifier = nn.Linear(self.total_feature_dimension, model_params.num_classes)
+        
+        self.aug_module = Augmentation(augment_params=aug_params)
     
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
+        
+        skeleton, flow = self.aug_module(skeleton, flow)
         # 1. only optical flow
         if self.only_I3D_branch:
             flow_map = self.I3D.extract_features(flow)
