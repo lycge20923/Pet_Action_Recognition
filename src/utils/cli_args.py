@@ -168,8 +168,8 @@ class ModelArguments:
         default=True,
         metadata={"help":"Whether add leanable adjacency matrix from optical flow in the architecture in DE-GCN"}
     )
-    flow_statistic_mode: Literal["mean+max+std", "mean+max", "mean"] = field(
-        default="mean+max+std",
+    flow_statistic_mode: Literal["mean+std", "mean"] = field(
+        default="mean+std",
         metadata={"help":"What kinds of statistic for sending the flow information."}
     )
     flow_block_size: int = field(
@@ -178,9 +178,7 @@ class ModelArguments:
     )
     @property
     def flow_statistic_dim(self) -> int: 
-        if self.flow_statistic_mode == "mean+max+std":
-            return 3
-        elif self.flow_statistic_mode == "mean+max": 
+        if self.flow_statistic_mode == "mean+std": 
             return 2
         else:
             return 1

@@ -427,17 +427,10 @@ class DE_GCN(nn.Module):
         mean_u = u.mean(dim=-1)                                    # (B,T,J)
         mean_v = v.mean(dim=-1)                                    # (B,T,J)
         
-        
-        
-        if flow_statistic_mode == "mean+max+std" or flow_statistic_mode == "mean+max":
-            max_abs_u = u.abs().amax(dim=-1)                           # (B,T,J)
-            max_abs_v = v.abs().amax(dim=-1)                           # (B,T,J)
-            if flow_statistic_mode == "mean+max+std":
-                std_u = u.std(dim=-1, unbiased=False)                      # (B,T,J)
-                std_v = v.std(dim=-1, unbiased=False)                      # (B,T,J)
-                stats = torch.stack([mean_u, mean_v, max_abs_u, max_abs_v, std_u, std_v], dim=-1)  # (B,T,J,4)
-            else:
-                stats = torch.stack([mean_u, mean_v, max_abs_u, max_abs_v], dim=-1)  # (B,T,J,4)
+        if flow_statistic_mode == "mean+std":
+            std_u = u.std(dim=-1, unbiased=False)                      # (B,T,J)
+            std_v = v.std(dim=-1, unbiased=False)                      # (B,T,J)
+            stats = torch.stack([mean_u, mean_v, std_u, std_v], dim=-1)  # (B,T,J,4)
         else:
             stats = torch.stack([mean_u, mean_v], dim=-1)  # (B,T,J,2)
 
