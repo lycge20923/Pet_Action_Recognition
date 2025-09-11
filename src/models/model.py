@@ -17,8 +17,8 @@ class ActionRecognitionModel(nn.Module):
     def __init__(self, 
                  model_params:ModelArguments,
                  data_params:DataArguments,
-                 aug_params:AugmentationArguments,
-                 coords):
+                 aug_params:AugmentationArguments = None,
+                 coords = None):
         super().__init__()
         self.only_I3D_branch = model_params.only_I3D_branch
         self.add_I3D_branch = model_params.add_I3D_branch
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     import numpy as np 
     model_params, data_params = ModelArguments(), DataArguments()
     coords = np.load(os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name))
-    act_model = ActionRecognitionModel(model_params, data_params, coords)
+    act_model = ActionRecognitionModel(model_params, data_params, coords=coords)
     act_model.eval()
 
     # --- begin test for I3D.extract_features output shape ---

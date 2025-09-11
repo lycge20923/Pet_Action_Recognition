@@ -161,7 +161,7 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
     coords = np.load(coord_path)
-    model = ActionRecognitionModel(model_params, data_params, coords).to(device)
+    model = ActionRecognitionModel(model_params, data_params, coords=coords).to(device)
     ckpt = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
@@ -254,7 +254,7 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
                 
             for kp_id, (x, y) in enumerate(keypoints):
                 mean_x, mean_y, std_x, std_y = velocity_info[kp_id].tolist() 
-                text_lines = [f"{kp_id}", f"{mean_x:.2f}", f"{mean_y:.2f}", f"{std_x:.2f}", f"{std_y:.2f}"]
+                text_lines = [f"{kp_id}", f"{mean_x:.2f} {mean_y:.2f}", f"{std_x:.2f} {std_y:.2f}"]
                 cv2.circle(frame, (x, y), 2, (0, 255, 255), -1)  # circle point
                 for i, line in enumerate(text_lines):
                     cv2.putText(

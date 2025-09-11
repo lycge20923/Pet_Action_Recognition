@@ -32,7 +32,10 @@ class Augmentation(nn.Module):
     ):
         super().__init__()
         # global
-        self.enable = bool(augment_params.augment)
+        if augment_params is None:
+            self.enable = None
+            return
+        self.enable = bool(augment_params.augment) 
         self.align_corners = bool(align_corners)
         self.resample_mode = str(resample_mode)
         self.pad_mode = str(pad_mode)
@@ -170,12 +173,12 @@ class Augmentation(nn.Module):
 
         # 時間
         k, f = self.frame_drop(k, f)
-        k, f = self.temporal_jitter(k, f)   
+        k, f = self.temporal_jitter(k, f)
 
         # 流場數值類
+        f = self.gaussian_blur_flow(f)
         f = self.add_flow_noise(f)
         f = self.random_flow_occlusion(f)
-        f = self.gaussian_blur_flow(f)
 
         return k, f
 
@@ -304,6 +307,16 @@ class Augmentation(nn.Module):
             s = torch.empty(B, T, device=device).uniform_(s_min, s_max)  # (B,T)
         else:
             s = torch.empty(B, 1, device=device).uniform_(s_min, s_max).expand(B, T)
+        
+        # pivot：有 kps 用骨架中心；否則用影像中心 0.5,0.5
+        if keypoints is not None:
+            cx, cy = self.get_center(keypoints)
+            cx = cx.expand(B, T, 1).contiguous()
+            cy = cy.expand(B, T, 1).contiguous()
+        else:
+            dtype_img = flows.dtype
+            cx = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
+            cy = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
 
         # --- flows 分支：影像 warp + 向量值域縮放 ---
         if flows is not None:
@@ -311,15 +324,6 @@ class Augmentation(nn.Module):
             Bf, _, Tf, H, W = flows.shape
             assert B == Bf and T == Tf, "scale: (B,T) mismatch between keypoints and flows"
             dtype_img = flows.dtype
-
-            # pivot：有 kps 用骨架中心；否則用影像中心 0.5,0.5
-            if keypoints is not None:
-                cx, cy = self.get_center(keypoints)
-                cx = cx.expand(B, T, 1).contiguous()
-                cy = cy.expand(B, T, 1).contiguous()
-            else:
-                cx = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
-                cy = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
 
             # 到 [-1,1] 座標並保持 pivot：t = (I - S) p
             cx_n = (cx * 2) - 1
@@ -446,7 +450,7 @@ class Augmentation(nn.Module):
 
     def shear(self, keypoints, flows):
         device = self._pick_device(keypoints, flows)
-        if torch.rand((), device=device) >= 0.3:
+        if torch.rand((), device=device) >= 0.2:
             return keypoints, flows
         if keypoints is None and flows is None:
             return None, None
@@ -466,22 +470,22 @@ class Augmentation(nn.Module):
             shx = ((torch.rand(B, 1, device=device) * 2 * shx_max) - shx_max).expand(B, T)
             shy = ((torch.rand(B, 1, device=device) * 2 * shy_max) - shy_max).expand(B, T)
 
+        # pivot：有 kps 用骨架中心；否則用影像中心 0.5,0.5
+        if keypoints is not None:
+            cx, cy = self.get_center(keypoints)
+            cx = cx.expand(B, T, 1).contiguous()
+            cy = cy.expand(B, T, 1).contiguous()
+        else:
+            dtype_img = flows.dtype
+            cx = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
+            cy = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
+
         # --- flows 分支：影像 warp（保持 pivot），並對 (u,v) 施加同一剪切 ---
         if flows is not None:
             assert flows.dim() == 5 and flows.size(1) == 2
             Bf, _, Tf, H, W = flows.shape
             assert B == Bf and T == Tf, "shear: (B,T) mismatch between keypoints and flows"
             dtype_img = flows.dtype
-
-            # pivot：有 kps 用骨架中心；否則用影像中心 0.5,0.5
-            if keypoints is not None:
-                cx, cy = self.get_center(keypoints)
-                cx = cx.expand(B, T, 1).contiguous()
-                cy = cy.expand(B, T, 1).contiguous()
-            else:
-                cx = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
-                cy = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
-
             # 轉到 [-1,1]，A = [[1, shx],[shy, 1]]；t = (I - A)p = [-shx*cy, -shy*cx]
             cx_n = (cx * 2) - 1
             cy_n = (cy * 2) - 1
@@ -542,7 +546,7 @@ class Augmentation(nn.Module):
 
     def hflip(self, keypoints, flows):
         device = self._pick_device(keypoints, flows)
-        if torch.rand((), device=device) >= self.flow_hflip_prob:
+        if torch.rand((), device=device) >= 0.5:
             return keypoints, flows
         device = self._pick_device(keypoints, flows)
         # gating removed to mirror aug_func.py (external control)
@@ -566,10 +570,11 @@ class Augmentation(nn.Module):
         return keypoints, flows
 
 
+
     # ---------- temporal ops ----------
     def temporal_jitter(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor]):
         device = self._pick_device(keypoints, flows)
-        if torch.rand((), device=device) >= self.p_temporal_jitter:
+        if torch.rand((), device=device) >= 0.3:
             return keypoints, flows
         if keypoints is None and flows is None:
             return None, None
@@ -631,7 +636,7 @@ class Augmentation(nn.Module):
 
     def frame_drop(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor]):
         device = self._pick_device(keypoints, flows)
-        if torch.rand((), device=device) >= self.frame_drop_ratio:
+        if torch.rand((), device=device) >= 0.3:
             return keypoints, flows
         if keypoints is None and flows is None:
             return None, None
@@ -688,7 +693,7 @@ class Augmentation(nn.Module):
         if flows is None:
             return None
         device = flows.device
-        if torch.rand((), device=device) >= self.occ_max:
+        if torch.rand((), device=device) >= 0.1:
             return flows
 
         B, C, T, H, W = flows.shape  # C=2
@@ -713,7 +718,7 @@ class Augmentation(nn.Module):
         if flows is None:
             return None
         device = flows.device
-        if torch.rand((), device=device) >= 0.5:
+        if torch.rand((), device=device) >= 0.3:
             return flows
 
         k = int(self.blur_ksize)
@@ -740,7 +745,11 @@ class Augmentation(nn.Module):
         # 準備 depthwise（groups=2）卷積權重
         weight = kernel2d.reshape(1, 1, k, k).repeat(C, 1, 1, 1)  # (2,1,k,k)
         padding = k // 2
+        '''
         out = F.conv2d(flows_bt, weight, bias=None, stride=1, padding=padding, groups=C)
+        '''
+        flows_bt = F.pad(flows_bt, (padding, padding, padding, padding), mode='reflect')
+        out = F.conv2d(flows_bt, weight, padding=0, groups=C)
 
         flows = out.reshape(B, T, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
         return flows
