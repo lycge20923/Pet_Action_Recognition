@@ -154,14 +154,14 @@ class ResultsArguments:
 
 @dataclass
 class ModelArguments:
-    _num_coords: int = field(
+    in_channels: int = field(
         default=3,
         metadata={"help": "The size of each coordination"}
     )
     # for ablation study
-    add_flow_coords: bool = field(
+    add_flow_stream: bool = field(
         default=True,
-        metadata={"help":"Delete confidence, and extend optical flow information (m_x, m_y, std_x, std_y) for gcn"}
+        metadata={"help":"Add the stream which inputs are flow instead of coords"}
     )
     # for ablation study
     add_flow_adjacency: bool = field(
@@ -173,19 +173,9 @@ class ModelArguments:
         metadata={"help":"What kinds of statistic for sending the flow information."}
     )
     flow_block_size: int = field(
-        default=5,
+        default=3,
         metadata={"help":"The patch size of the flow for each keypoints"}
     )
-    @property
-    def flow_statistic_dim(self) -> int: 
-        if self.flow_statistic_mode == "mean+std": 
-            return 2
-        else:
-            return 1
-    
-    @property
-    def in_channels(self) -> int:
-        return 2 + self.flow_statistic_dim * 2 if self.add_flow_coords else self._num_coords
 
     base_channels: int = field(
         default=64, 

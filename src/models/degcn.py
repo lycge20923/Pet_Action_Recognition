@@ -7,7 +7,6 @@ import torch.nn.functional as F
 
 from .gcn.tools import *
 from .gcn.graph import Graph
-from .gcn.new_modules import FlowAdjacencyModule
 from ..utils.cli_args import ModelArguments, DataArguments
 
 LEAKY_ALPHA = 0.1
@@ -45,7 +44,7 @@ class ST_GC(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels * self.Nh, 1) 
         self.bn = nn.BatchNorm2d(out_channels)
 
-    def forward(self, x, flow_map=None):
+    def forward(self, x):
         N, C, T, V = x.size() # 32, 3, 32, 17
         v = self.conv(x).view(N, self.Nh, -1, T, V) # N, out_channels*Nf, T, 17 -> N, Nf, output_channels, T, V) 
         weights = self.A.to(v.dtype)
@@ -59,11 +58,11 @@ class ST_GC(nn.Module):
         '''
         x = torch.einsum('hvu,nhctu->nctv', weights, v) # N, output_channels, T, V = 32, 64, 32, 17
         x = self.bn(x) # same dim
-        return x, None # for output alignment 
+        return x # for output alignment 
     
 
 class CTR_GC(nn.Module):
-    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, flow_adj=False, flow_statistic_dim=None): # 64*a, 64*b, (3, 17, 17), 4, 17
+    def __init__(self, in_channels, out_channels, A, num_scale=1, num_nodes=17, start_ch=3): # 64*a, 64*b, (3, 17, 17), 4, 17
         super(CTR_GC, self).__init__()
 
         A = torch.from_numpy(A.astype(np.float32))
@@ -74,7 +73,7 @@ class CTR_GC(nn.Module):
         '''
         in_channels would never be 3 since it only exists in first block 
         '''
-        rel_channels = in_channels // 8 if in_channels != 3 else 8 # 64*a//8 
+        rel_channels = in_channels // 8 if in_channels != start_ch else 8 # 64*a//8 
         
         self.conv1 = nn.Conv2d(in_channels, rel_channels * self.Nh, 1, groups=num_scale)
         self.conv2 = nn.Conv2d(in_channels, rel_channels * self.Nh, 1, groups=num_scale)
@@ -82,17 +81,12 @@ class CTR_GC(nn.Module):
         self.conv4 = nn.Conv2d(rel_channels * self.Nh, out_channels * self.Nh, 1, groups=num_scale * self.Nh)
         
         self.alpha = nn.Parameter(torch.zeros(1))
-        self.beta = nn.Parameter(torch.zeros(1))
         self.bn = nn.BatchNorm2d(out_channels)
     
         self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         
-        self.flow_adj = flow_adj
-        if self.flow_adj:
-            self.flow_adj = FlowAdjacencyModule(num_nodes=num_nodes, flow_statistic_dim=flow_statistic_dim, patch_size=5, hidden_dims=[16, 32, 16])
-
-    def forward(self, x, flow_map=None):
+    def forward(self, x):
         N, C, T, V = x.size()
         res = x
         
@@ -107,24 +101,14 @@ class CTR_GC(nn.Module):
         weights: (N, ) -> (N, 4, nh, , V, V)
         '''
         weights = self.conv4(self.tanh(q.unsqueeze(-1) - k.unsqueeze(-2))).view(N, self.num_scale, self.Nh, -1, V, V)    
-        
-        # weights = weights * self.alpha.to(weights.dtype) + self.A.view(1, 1, self.Nh, 1, V, V).to(weights.dtype)
-        A_flow = None
-        if self.flow_adj and (flow_map is not None):
-            A_flow = self.flow_adj(flow_map)  # (N, V, V)
-            Af = A_flow.unsqueeze(1).expand(-1, self.Nh, -1, -1) 
-            A_dyn = Af.unsqueeze(1).unsqueeze(3)
-            A_dyn = A_dyn.to(weights.dtype).to(weights.device)
-        else:
-            A_dyn = 0
         dtype = weights.dtype
         device = weights.device
         
         A_static = self.A.view(1,1,self.Nh,1,V,V).to(dtype).to(device)
-        weights = weights * self.alpha.to(dtype) + A_static + A_dyn * self.beta.to(dtype)
+        weights = weights * self.alpha.to(dtype) + A_static
         x = torch.einsum('ngacvu, ngactu->ngctv', weights, v).contiguous().view(N, -1, T, V)
         x = self.bn(x)
-        return x, A_flow # for visualizing A_dyn
+        return x
     
 class DeTGC(nn.Module):
     def __init__(self, in_channels, out_channels, eta, kernel_size=1, stride=1, padding=0, dilation=1, 
@@ -226,8 +210,7 @@ class MultiScale_TemporalModeling(nn.Module):
         return x
     
 class Basic_Block(nn.Module):
-    def __init__(self, in_channels, out_channels, A, k, eta, kernel_size=5, stride=1, dilations=2, 
-                 num_frame=64, num_joint=25, residual=True, flow_adj=False, start_ch = 3, flow_statistic_dim=None):
+    def __init__(self, in_channels, out_channels, A, eta, stride=1, num_frame=64, residual=True, start_ch=3):
         super(Basic_Block, self).__init__()
         
         num_scale = 4
@@ -241,8 +224,7 @@ class Basic_Block(nn.Module):
                               out_channels, 
                               A, 
                               self.num_scale,
-                              flow_adj=flow_adj,
-                              flow_statistic_dim=flow_statistic_dim)
+                              start_ch=start_ch)
         self.tcn = MultiScale_TemporalModeling(out_channels, 
                                                out_channels, 
                                                eta,
@@ -266,15 +248,15 @@ class Basic_Block(nn.Module):
         init_param(self.modules())
     
     # def forward(self, x):
-    def forward(self, x, flow_map=None):
+    def forward(self, x):
         res = x
-        x, A_flow = self.gcn(x, flow_map)
+        x = self.gcn(x)
         x = self.relu(x + self.residual1(res))
         x = self.tcn(x)
         x = x + self.residual2(res)            
         x = self.relu(x)
         
-        return x, A_flow
+        return x
 
 
 def bn_init(bn, scale):
@@ -282,27 +264,24 @@ def bn_init(bn, scale):
     nn.init.constant_(bn.bias, 0)
 
 class DeGCN(nn.Module):
-    def __init__(self, block_args, A, k, eta, flow_adj):
+    def __init__(self, block_args, A, eta):
         super().__init__()
         self.blocks = nn.ModuleList([
             Basic_Block(
-                in_ch, out_ch, A, k, eta,
+                in_ch, out_ch, A, eta,
                 stride=stride,
-                num_frame=num_frame,
-                num_joint=num_joint,
                 residual=residual,
-                flow_adj=flow_adj,
+                num_frame=num_frame,
                 start_ch = start_ch,
-                flow_statistic_dim=flow_statistic_dim
             )
-            for in_ch, out_ch, stride, residual, num_frame, num_joint, start_ch, flow_statistic_dim in block_args
+            for in_ch, out_ch, stride, residual, num_frame, start_ch in block_args
         ])
 
-    def forward(self, x, flow_map=None):
+    def forward(self, x):
         # x: (N*M, C, T, V)
         for block in self.blocks:
-            x, A_flow = block(x, flow_map)
-        return x, A_flow
+            x = block(x)
+        return x
 
 class DE_GCN(nn.Module):
     def __init__(
@@ -310,48 +289,58 @@ class DE_GCN(nn.Module):
     ):
         super(DE_GCN, self).__init__()
         self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
-        A = self.graph.A  # (3, V, V)
+        self.A = self.graph.A  # (3, V, V)
+        self.k = k
+        self.eta = eta
+        self.num_person = num_person
+        self.model_params = model_params
+        self.data_params = data_params
+        self.flow_block_size = model_params.flow_block_size
         
-        self.data_bn = nn.BatchNorm1d(num_person * model_params.in_channels * data_params.num_nodes)
-        bn_init(self.data_bn, 1)
+        self.data_bn, self.streams, self.fc = self._init_streams(model_params.in_channels)
         
-        block_list = [
-            [model_params.in_channels, model_params.base_channels, 1, False, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels, model_params.base_channels, 1, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels, model_params.base_channels * 2, 2, True, data_params.num_samples, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels * 2, model_params.base_channels * 2, 1, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels * 2, model_params.base_channels * 4, 2, True, data_params.num_samples // 2, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim],
-            [model_params.base_channels * 4, model_params.base_channels * 4, 1, True, data_params.num_samples // 4, data_params.num_nodes, model_params.in_channels, model_params.flow_statistic_dim]
-        ]
-        self.blockargs = [block_list[int(i - 1)] for i in model_params.gcn_include_blocks]
-
-        self.num_stream = model_params.degcn_num_streams
-        self.streams = nn.ModuleList([
-            DeGCN(self.blockargs, A, k, eta, flow_adj=model_params.add_flow_adjacency) for _ in range(self.num_stream)
-        ])
-        self.fc = nn.ModuleList([
-            nn.Linear(model_params.base_channels*4, model_params.num_classes) for _ in range(self.num_stream)
-        ])
-        for fc in self.fc:
-            nn.init.normal_(fc.weight, 0, math.sqrt(2. / model_params.num_classes))
+        self.add_flow_stream = model_params.add_flow_stream
+        if self.add_flow_stream:
+            in_channels_flow = 2 * model_params.flow_block_size * model_params.flow_block_size
+            self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels_flow)
+        
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
         else:
-            self.drop_out = lambda x: x
-        
-        self.add_flow_coords = model_params.add_flow_coords
-        self.flow_statistic_mode, self.flow_block_size = model_params.flow_statistic_mode, model_params.flow_block_size
-        self.add_flow_adjacency = model_params.add_flow_adjacency
-        self.in_channels = model_params.in_channels
+            self.drop_out = lambda x: x  
     
+    def _init_streams(self, in_channels):
+        data_bn = nn.BatchNorm1d(self.num_person * in_channels * self.data_params.num_nodes)
+        bn_init(data_bn, 1)
+        
+        block_list = [
+            [in_channels, self.model_params.base_channels, 1, False, self.data_params.num_samples, in_channels],
+            [self.model_params.base_channels, self.model_params.base_channels, 1, True, self.data_params.num_samples, in_channels],
+            [self.model_params.base_channels, self.model_params.base_channels, 1, True, self.data_params.num_samples, in_channels],
+            [self.model_params.base_channels, self.model_params.base_channels, 1, True, self.data_params.num_samples, in_channels],
+            [self.model_params.base_channels, self.model_params.base_channels * 2, 2, True, self.data_params.num_samples, in_channels],
+            [self.model_params.base_channels * 2, self.model_params.base_channels * 2, 1, True, self.data_params.num_samples // 2, in_channels],
+            [self.model_params.base_channels * 2, self.model_params.base_channels * 2, 1, True, self.data_params.num_samples // 2, in_channels],
+            [self.model_params.base_channels * 2, self.model_params.base_channels * 4, 2, True, self.data_params.num_samples // 2, in_channels],
+            [self.model_params.base_channels * 4, self.model_params.base_channels * 4, 1, True, self.data_params.num_samples // 4, in_channels],
+            [self.model_params.base_channels * 4, self.model_params.base_channels * 4, 1, True, self.data_params.num_samples // 4, in_channels]
+        ]
+        blockargs = [block_list[int(i - 1)] for i in self.model_params.gcn_include_blocks]
+        streams = nn.ModuleList([
+            DeGCN(blockargs, self.A, self.eta)for _ in range(self.model_params.degcn_num_streams)]
+        )
+        
+        fc = nn.ModuleList([
+            nn.Linear(self.model_params.base_channels*4, self.model_params.num_classes) for _ in range(self.model_params.degcn_num_streams)
+        ])
+        for fc_ in fc:
+            nn.init.normal_(fc_.weight, 0, math.sqrt(2. / self.model_params.num_classes))
+        
+        return data_bn, streams, fc
+        
     def local_flow_stats(self, keypoints: torch.Tensor,
                         optical_flows: torch.Tensor,
-                        flow_block_size: int = 5,
-                        flow_statistic_mode:str="mean+max"):
+                        flow_block_size: int = 3):
         """
         Args:
             keypoints:      (B, 3, T, J) – normalized (x, y, conf), but x/y may be outside [0,1].
@@ -418,69 +407,68 @@ class DE_GCN(nn.Module):
             padding_mode='border',
             align_corners=False
         )  # (BTJ, 2, ps, ps)
-
-        # 8) 統計 (mean_u, mean_v, max_abs_u, max_abs_v, mean_mag)
-        patches = patches.view(B, T, J, 2, P)                      # (B,T,J,2,P)
-        u = patches[:, :, :, 0, :]                                 # (B,T,J,P)
-        v = patches[:, :, :, 1, :]                                 # (B,T,J,P)
-
-        mean_u = u.mean(dim=-1)                                    # (B,T,J)
-        mean_v = v.mean(dim=-1)                                    # (B,T,J)
         
-        if flow_statistic_mode == "mean+std":
-            std_u = u.std(dim=-1, unbiased=False)                      # (B,T,J)
-            std_v = v.std(dim=-1, unbiased=False)                      # (B,T,J)
-            stats = torch.stack([mean_u, mean_v, std_u, std_v], dim=-1)  # (B,T,J,4)
-        else:
-            stats = torch.stack([mean_u, mean_v], dim=-1)  # (B,T,J,2)
+        # 7) 整理成 (B, 2*ps*ps, T, J)
+        patches = patches.view(B, T, J, 2, ps, ps)          # (B,T,J,2,ps,ps)
+        patches = patches.permute(0, 3, 4, 5, 1, 2).contiguous()  # (B,2,ps,ps,T,J)
+        patches = patches.view(B, 2 * ps * ps, T, J)        # (B, C_flow, T, J)
+        
+        # 8) 遮罩無效點（conf=0 或 [0,0,0]）
+        with torch.no_grad():
+            x0 = (keypoints[:, 0] == 0)
+            y0 = (keypoints[:, 1] == 0)
+            c0 = (keypoints[:, 2] == 0)
+            zero_xyc = (x0 & y0 & c0)                       # (B,T,J)
+            valid = ((keypoints[:, 2] > 0) & (~zero_xyc)).float()  # (B,T,J)
+        patches = patches * valid.unsqueeze(1)              # broadcast 到 C_flow
 
-        # 9) 遮罩：若 [x,y,conf]==[0,0,0] 或 conf==0，該點設 0
-        zero_xyc = ((x == 0) & (y == 0) & (conf == 0)).to(dtype)   # (B,T,J)
-        valid    = ((conf > 0).to(dtype) * (1.0 - zero_xyc)).unsqueeze(-1)  # (B,T,J,1)
-        stats    = stats * valid
+        return patches  # (B, 2*ps*ps, T, J)
 
-        # 10) 回傳 (B, T, J, ...)
-        return stats
 
     def forward(self, x, optical_flows=None):
         keypoints = x.detach().clone()
-        flow_map = None
-        if (self.add_flow_coords or self.add_flow_adjacency) and optical_flows is not None:
-            flow_map = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size, self.flow_statistic_mode)
-            if self.add_flow_coords:
-                x = torch.cat([keypoints[:, :2, ...], flow_map.permute(0, 3, 1, 2)], axis=1)
         
-        # Input reshape and batchnorm
-        # if x.dim() == self.in_channels:
-            
-        #     N, T, VC = x.shape
-        #     x = x.view(N, T, self.num_point, -1)
-        #     x = x.permute(0, 3, 1, 2).contiguous().unsqueeze(-1)
+        # Multi-stream processing and pooling
+        feats, logits_list = [], []
+        
+        # stream of coords
         x = x.unsqueeze(-1)
         N, C, T, V, M = x.size()
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
         x = self.data_bn(x)
         x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
         x_ = x
-
-        # Multi-stream processing and pooling
-        feats, logits_list = [], []
         for i, (stream, fc) in enumerate(zip(self.streams, self.fc)):
-            if self.add_flow_adjacency is not None:
-                x_s, A_flow = stream(x_, flow_map) 
-            else:
-                x_s, _ = stream(x_) # (N*M, C', T', V')
+            x_s = stream(x_) # (N*M, C', T', V')
             c_new = x_s.size(1)
             x_pooled = x_s.reshape(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
             x_d = self.drop_out(x_pooled)
             logits = fc(x_d)                   # (N, num_class)
             feats.append(x_pooled)
             logits_list.append(logits)
-        last_A_flow = A_flow if self.add_flow_adjacency else None
+
+        # stream of flow
+        if self.add_flow_stream:
+            y = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
+            y = y.unsqueeze(-1)
+            N, C, T, V, M = y.size()
+            y = y.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
+            y = self.data_bn_flow(y)
+            y = y.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
+            y_ = y
+            for i, (stream, fc) in enumerate(zip(self.streams_flow, self.fc_flow)):
+                y_s = stream(y_) # (N*M, C', T', V')
+                c_new = y_s.size(1)
+                y_pooled = y_s.reshape(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
+                y_d = self.drop_out(y_pooled)
+                logits = fc(y_d)                   # (N, num_class)
+                feats.append(y_pooled)
+                logits_list.append(logits)
+        
         # Average across streams
         feat = torch.stack(feats, dim=0).mean(dim=0)         # (N, C')
         logits = torch.stack(logits_list, dim=0).mean(dim=0) # (N, num_class)
-        return feat, logits, last_A_flow, flow_map 
+        return feat, logits
 
 if __name__ == "__main__":
     pass

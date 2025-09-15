@@ -82,7 +82,7 @@ class ActionRecognitionModel(nn.Module):
             return combined_feat, main_task_logits, None, None
         
         # 2. at least use skeleton information
-        skel_feat, _, last_flow_A, flow_map = self.skel_model(skeleton, flow)
+        skel_feat, _ = self.skel_model(skeleton, flow)
         combined_feat = skel_feat
         if self.add_I3D_branch and self.I3D is not None and flow is not None:
             flow_map = self.I3D.extract_features(flow)
@@ -91,7 +91,7 @@ class ActionRecognitionModel(nn.Module):
             combined_feat = torch.cat([skel_feat, projected_flow_feat], dim=1)
 
         main_task_logits = self.final_classifier(combined_feat)
-        return combined_feat, main_task_logits, last_flow_A, flow_map 
+        return combined_feat, main_task_logits
 
 class ContrastiveActionWrapper(nn.Module):
     def __init__(self, backbone: ActionRecognitionModel, emb_dim:int):
@@ -105,9 +105,9 @@ class ContrastiveActionWrapper(nn.Module):
         feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow, labels=labels)
     '''
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
-        feat_from_backbone, main_logits, last_flow_A, flow_map = self.backbone(skeleton, flow=flow)
+        feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
-        return emb, main_logits, last_flow_A, flow_map 
+        return emb, main_logits
 
 if __name__ == "__main__":
     import numpy as np 

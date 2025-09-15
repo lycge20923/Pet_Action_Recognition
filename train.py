@@ -287,8 +287,8 @@ def train_one_epoch(model,
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
             y = y.to(device)
-            emb1, logit1, _, _ = model(kp1, flow1)
-            emb2, logit2, _, _ = model(kp2 ,flow2)
+            emb1, logit1 = model(kp1, flow1)
+            emb2, logit2 = model(kp2 ,flow2)
             
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
@@ -301,6 +301,16 @@ def train_one_epoch(model,
             batch_loss_total = batch_loss_ce + batch_loss_cl 
             
             batch_loss_total.backward()
+            
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         print(
+            #             name,
+            #             "mean:", f"{param.grad.mean().item():.5f}",
+            #             "std:",  f"{param.grad.std().item():.5f}",
+            #             "norm:", f"{param.grad.norm().item():.5f}"
+            #         )
+            
             optimizer.step()
             
             batch_size_pairs = lab1.size(0)
@@ -316,7 +326,7 @@ def train_one_epoch(model,
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
-            _, output, _, _ = model(kps, flow)
+            _, output = model(kps, flow)
 
             batch_loss_ce = cross_entropy_loss(output, label)
             batch_loss_total = batch_loss_ce
@@ -364,9 +374,9 @@ def val_one_epoch(model,
             label = label.to(device)
             
             if train_params.add_contrastive_loss:
-                _, output, _, _ = model.backbone(kps, flow)
+                _, output = model.backbone(kps, flow)
             else:
-                _, output, _, _ = model(kps, flow)
+                _, output = model(kps, flow)
             loss = cross_entropy_loss(output, label)
             current_batch_size = label.size(0)
             total_samples += current_batch_size
