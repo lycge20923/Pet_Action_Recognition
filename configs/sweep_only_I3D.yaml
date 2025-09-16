@@ -7,9 +7,11 @@ parameters:
   fold_num:
     values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["4. formal:only I3D"]
+    values: ["formal:only I3D"]
   only_I3D_branch:
     values: [True]
   # other parameters...
   epochs:
-    values: [200]
+    values: [300]
+  patient_epochs:
+    values: [100]

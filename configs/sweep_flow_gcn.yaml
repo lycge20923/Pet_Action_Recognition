@@ -10,6 +10,8 @@ parameters:
     values: ["exp"]
   epochs:
     values: [2000]
+  patient_epochs:
+    values: [500]
   batch_size:
     values: [32]
   add_I3D_branch:

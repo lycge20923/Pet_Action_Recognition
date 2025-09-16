@@ -273,6 +273,10 @@ class ModelArguments:
         default=128,
         metadata={"help":"Project to have the similar size with ST-GCN"}
     )
+    use_frame_diff: bool = field(
+        default=False,
+        metadata={"help": "This is for ablation study, for showing using information of optical flow is better"}
+    )
     
     
 @dataclass
@@ -363,7 +367,7 @@ class TrainingArguments:
     )
 
     epochs: int = field(
-        default=100,
+        default=300,
         metadata={"help": "Total number of training epochs. For only training GCN, it is recommended to change to at least 1000"}
     )
     batch_size: int = field(
@@ -407,7 +411,7 @@ class TrainingArguments:
         metadata={"help":"The root directory for saving files while training"}
     )
     patient_epochs: int = field(
-        default= 500, 
+        default= 100, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
     # for ablation study
