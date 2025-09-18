@@ -333,7 +333,7 @@ class TD_GCN(nn.Module):
         else:
             self.drop_out = lambda x: x
 
-    def forward(self, x):
+    def forward(self, x, flow: torch.Tensor=None):
         if len(x.shape) == 3:
             N, T, VC = x.shape
             x = x.view(N, T, self.num_point, -1).permute(0, 3, 1, 2).contiguous().unsqueeze(-1)

@@ -42,7 +42,6 @@ def setup_experiments():
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_root_dir_name, timestamp)
-    os.makedirs(saving_dir, exist_ok=True)
     
     # save parameters
     complete_config_to_save = {
@@ -52,24 +51,27 @@ def setup_experiments():
         "training_params": dataclasses.asdict(train_params),
         "training_completed_at": timestamp 
     }
+    return_params = {"run": run,
+                     "parameters":
+                         {"data": data_params, 
+                          "model":model_params, 
+                          "train":train_params, 
+                          "aug_train": aug_params_train,
+                          "aug_val": aug_params_eval},
+                    "saving_dir":saving_dir
+                    }
     
-    try:
-        with open(os.path.join(saving_dir, train_params.save_complete_args_name), 'w', encoding='utf-8') as f:
-            json.dump(complete_config_to_save, f, indent=4, ensure_ascii=False)
-        with open(os.path.join(saving_dir, train_params.save_adjusted_args_name), 'w', encoding='utf-8') as f:
-            yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True)
-    except Exception as e:
-        print(f"{e}")
+    if not train_params.for_test:
+        os.makedirs(saving_dir, exist_ok=True)
+        try:
+            with open(os.path.join(saving_dir, train_params.save_complete_args_name), 'w', encoding='utf-8') as f:
+                json.dump(complete_config_to_save, f, indent=4, ensure_ascii=False)
+            with open(os.path.join(saving_dir, train_params.save_adjusted_args_name), 'w', encoding='utf-8') as f:
+                yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            print(f"{e}")
     
-    return {"run": run, 
-            "parameters":
-                {"data": data_params, 
-                 "model":model_params, 
-                 "train":train_params, 
-                 "aug_train": aug_params_train,
-                 "aug_val": aug_params_eval},
-            "saving_dir":saving_dir
-            }
+    return return_params
 
 def custom_collate(batch):
     first_item = batch[0]
@@ -122,8 +124,8 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
     
-    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False, fold_num=data_params.fold_num)
-    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True, fold_num=data_params.fold_num)
+    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
+    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
     
     # calculate the dataset size
     train_size = len(train_dataset)
@@ -149,7 +151,7 @@ def prepare_dataloaders(data_params:DataArguments,
 
     # for contrastive learning
     if train_params.add_contrastive_loss:
-        train_dataset = SiameseKpOfDataset(train_dataset, data_params)
+        train_dataset = SiameseKpOfDataset(train_dataset)
     
     if model_params.gcn_model_name == "stgcn":
         coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
@@ -510,37 +512,38 @@ def main():
                 save_model = model
                 print("Info: Saving ActionRecognitionModel state_dict.")
             
-            # save 
-            # for best model saving
-            if train_params.save_best_gcn_weights:
-                torch.save(
-                    save_model.skel_model.state_dict(),
-                    saving_self_training_best_gcn_weights_path(data_params,model_params)
-                )
-            
-            # for one-run model saving
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': save_model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'loss': val_loss,
-                'accuracy': val_acc,
-                'model_params': model_params, 
-                'dataset_params': data_params, 
-            }, os.path.join(saving_dir, 'best.pth'))
-            
-            # save cofusion matrix
-            np.savetxt(os.path.join(saving_dir, "confusion_matrix.csv"), cm, fmt="%.2f", delimiter=',')
-            
-            # pre-process and save predict details
-            for video_name, details in all_details.items():
-                all_details[video_name]["ground-trues"] = ' '.join(set([data_params.actions[index] for index in all_details[video_name]["ground-trues"]]))
-                all_details[video_name]["preds"] = '|'.join([data_params.actions[index] for index in all_details[video_name]["preds"]])
-            
-            if train_params.save_predict_details_name:
-                details_path = os.path.join(saving_dir, train_params.save_predict_details_name)
-                with open(details_path, "w", encoding="utf-8") as f:
-                    json.dump(all_details, f, ensure_ascii=False, indent=2)
+            if not train_params.for_test:
+                # save 
+                # for best model saving
+                if train_params.save_best_gcn_weights:
+                    torch.save(
+                        save_model.skel_model.state_dict(),
+                        saving_self_training_best_gcn_weights_path(data_params,model_params)
+                    )
+                
+                # for one-run model saving
+                torch.save({
+                    'epoch': epoch + 1,
+                    'model_state_dict': save_model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'loss': val_loss,
+                    'accuracy': val_acc,
+                    'model_params': model_params, 
+                    'dataset_params': data_params, 
+                }, os.path.join(saving_dir, 'best.pth'))
+                
+                # save cofusion matrix
+                np.savetxt(os.path.join(saving_dir, "confusion_matrix.csv"), cm, fmt="%.2f", delimiter=',')
+                
+                # pre-process and save predict details
+                for video_name, details in all_details.items():
+                    all_details[video_name]["ground-trues"] = ' '.join(set([data_params.actions[index] for index in all_details[video_name]["ground-trues"]]))
+                    all_details[video_name]["preds"] = '|'.join([data_params.actions[index] for index in all_details[video_name]["preds"]])
+                
+                if train_params.save_predict_details_name:
+                    details_path = os.path.join(saving_dir, train_params.save_predict_details_name)
+                    with open(details_path, "w", encoding="utf-8") as f:
+                        json.dump(all_details, f, ensure_ascii=False, indent=2)
 
             patient_count = 0
         wandb.log({"best_val_acc": best_val_acc})

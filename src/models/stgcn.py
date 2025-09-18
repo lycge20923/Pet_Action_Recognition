@@ -258,7 +258,7 @@ class ST_GCN(nn.Module):
         # Prediction head
         self.fc = nn.Conv2d(model_params.base_channels*4, model_params.num_classes, kernel_size=1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, flow: torch.Tensor=None) -> torch.Tensor:
         N, C, T, V = x.size()
         
         # BN

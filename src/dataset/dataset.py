@@ -20,7 +20,9 @@ class KpOfDataset(Dataset):
                  model_params: ModelArguments,
                  istrain: bool = True,
                  fold_num: int = 0,
-                 data_seg_num: int = 6
+                 data_seg_num: int = 6,
+                 for_test = False,
+                 test_len = 32
                  ):
         super().__init__()
         self.data_params = data_params
@@ -40,6 +42,9 @@ class KpOfDataset(Dataset):
             self.annotations = [sample for sample in self.annotations if sample['fold'] != fold_num]
         else:
             self.annotations = [sample for sample in self.annotations if sample['fold'] == fold_num]
+        
+        if for_test:
+            self.annotations = self.annotations[:test_len]
         
         # trial loading complete at first time
         self.data_seg_num = data_seg_num
@@ -109,12 +114,10 @@ class SiameseKpOfDataset(Dataset):
       lab1, lab2: labels for CE loss
       y: binary (0: same, 1: different) for ContrastiveLoss
     """
-    def __init__(self, base_dataset: KpOfDataset, data_args:DataArguments):
+    def __init__(self, base_dataset: KpOfDataset):
         self.base = base_dataset
         # Build mapping label -> indices for sampling
         self.label_to_indices = {}
-        with open(os.path.join(data_args.data_dir, data_args.trainsplit_dir_name, "annotation_windows_metadata.json"), 'r') as f:
-            self.annotations = json.load(f)
         for idx, sample_annotation in enumerate(self.base.annotations):
             lab = int(sample_annotation['action_id'])
             self.label_to_indices.setdefault(lab, []).append(idx)

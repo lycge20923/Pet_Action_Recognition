@@ -459,3 +459,7 @@ class TrainingArguments:
         metadata={"help":"If use 'use_multiplie_learning_rates', then this \
             indicate the learning rate for fusing branch"}
     )
+    for_test: float = field(
+        default=False, 
+        metadata={"help":"Whether this is for testing, not formal process of training"}
+    )
