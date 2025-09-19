@@ -224,7 +224,7 @@ class EncodingBlock(nn.Module):
 
 
 class Info_GCN(nn.Module):
-    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, noise_ratio=0.1, k=0, gain=1, drop_out=0):
+    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, noise_ratio=0.1, k=1, gain=1, drop_out=0):
         super(Info_GCN, self).__init__()
         
         self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
