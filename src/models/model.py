@@ -7,6 +7,7 @@ from torch.distributions import Normal
 from .stgcn import ST_GCN
 from .tdgcn import TD_GCN
 from .degcn import DE_GCN
+from .infogcn import Info_GCN
 from .I3D import InceptionI3d
 from ..utils.cli_args import ModelArguments, DataArguments, AugmentationArguments
 from ..utils.common import saving_self_training_best_gcn_weights_path
@@ -31,6 +32,9 @@ class ActionRecognitionModel(nn.Module):
             elif model_params.gcn_model_name == "stgcn":
                 self.skel_model = ST_GCN(model_params=model_params, data_params=data_params, coords=coords)
                 self._skel_feat_dim = self.skel_model.fc.in_channels
+            elif model_params.gcn_model_name == "infogcn":
+                self.skel_model = Info_GCN(model_params=model_params, data_params=data_params)
+                self._skel_feat_dim = self.skel_model.decoder.in_features
             elif model_params.gcn_model_name == "degcn":
                 self.skel_model = DE_GCN(model_params=model_params, data_params=data_params)
                 self._skel_feat_dim = self.skel_model.fc[0].in_features

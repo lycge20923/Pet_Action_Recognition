@@ -14,4 +14,4 @@ parameters:
   epochs:
     values: [300]
   patient_epochs:
-    values: [100]
+    values: [200]

@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from .gcn.tools import *
 from .gcn.graph import Graph
 from ..utils.cli_args import ModelArguments, DataArguments
+from .gcn.new_modules import TemporalFlowAdjacency
 
 LEAKY_ALPHA = 0.1
 def init_param(modules):
@@ -44,19 +45,28 @@ class ST_GC(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels * self.Nh, 1) 
         self.bn = nn.BatchNorm2d(out_channels)
 
-    def forward(self, x):
+    def forward(self, x, A_dyn=None):
         N, C, T, V = x.size() # 32, 3, 32, 17
         v = self.conv(x).view(N, self.Nh, -1, T, V) # N, out_channels*Nf, T, 17 -> N, Nf, output_channels, T, V) 
         weights = self.A.to(v.dtype)
-        
-        '''
-        h: 3, v, u:17
-        n: N, h:hf, c:output_channels=64, t: 32, u: 17
-        function: 
-            1. for each head(total 3), weights[h], times and sum v[:, h, :, :, :] 
-            2. Sum all results in the dimension of head, and delete h, u
-        '''
-        x = torch.einsum('hvu,nhctu->nctv', weights, v) # N, output_channels, T, V = 32, 64, 32, 17
+        if A_dyn is not None:
+            A_dyn = A_dyn.to(dtype=v.dtype, device=v.device)
+            W_cat = torch.cat([
+                A_dyn.unsqueeze(1),                               # (N,1,17,17)
+                weights.unsqueeze(0).expand(N, -1, -1, -1)        # (N,3,17,17)
+            ], dim=1)
+            v_dyn = v.mean(dim=1, keepdim=True)                   # (N,1,Cout,T,V)
+            v_cat = torch.cat([v_dyn, v], dim=1)                  # (N,4,Cout,T,V)
+            x = torch.einsum('nhvu,nhctu->nctv', W_cat, v_cat)    # (N, Cout, T, V)
+        else:
+            '''
+            h: 3, v, u:17
+            n: N, h:hf, c:output_channels=64, t: 32, u: 17
+            function: 
+                1. for each head(total 3), weights[h], times and sum v[:, h, :, :, :] 
+                2. Sum all results in the dimension of head, and delete h, u
+            '''
+            x = torch.einsum('hvu,nhctu->nctv', weights, v) # N, output_channels, T, V = 32, 64, 32, 17
         x = self.bn(x) # same dim
         return x # for output alignment 
     
@@ -86,7 +96,7 @@ class CTR_GC(nn.Module):
         self.tanh = nn.Tanh()
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         
-    def forward(self, x):
+    def forward(self, x, A_dyn=None):
         N, C, T, V = x.size()
         res = x
         
@@ -248,20 +258,15 @@ class Basic_Block(nn.Module):
         init_param(self.modules())
     
     # def forward(self, x):
-    def forward(self, x):
+    def forward(self, x, A_dyn=None):
         res = x
-        x = self.gcn(x)
+        x = self.gcn(x, A_dyn)
         x = self.relu(x + self.residual1(res))
         x = self.tcn(x)
         x = x + self.residual2(res)            
         x = self.relu(x)
         
         return x
-
-
-def bn_init(bn, scale):
-    nn.init.constant_(bn.weight, scale)
-    nn.init.constant_(bn.bias, 0)
 
 class DeGCN(nn.Module):
     def __init__(self, block_args, A, eta):
@@ -277,10 +282,10 @@ class DeGCN(nn.Module):
             for in_ch, out_ch, stride, residual, num_frame, start_ch in block_args
         ])
 
-    def forward(self, x):
+    def forward(self, x, A_dyn=None):
         # x: (N*M, C, T, V)
         for block in self.blocks:
-            x = block(x)
+            x = block(x, A_dyn)
         return x
 
 class DE_GCN(nn.Module):
@@ -301,12 +306,16 @@ class DE_GCN(nn.Module):
         self.data_bn, self.streams, self.fc = self._init_streams(model_params.in_channels)
         
         self.add_flow_stream = model_params.add_flow_stream
-        if self.add_flow_stream:
+        self.add_flow_adjacency = model_params.add_flow_adjacency
+        if self.add_flow_stream or self.add_flow_adjacency:
             in_channels_flow = 2 * model_params.flow_block_size * model_params.flow_block_size
-            self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels_flow)
+            if self.add_flow_stream:
+                self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels_flow)
+            if self.add_flow_adjacency:
+                self.flow_adj_module = TemporalFlowAdjacency(C_in=in_channels_flow)
         
         if self.use_frame_diff:
-            assert not (self.add_flow_stream)
+            assert not (self.add_flow_stream or self.add_flow_adjacency)
             in_channels = 2
             self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels)
         
@@ -453,8 +462,10 @@ class DE_GCN(nn.Module):
         feats, logits_list = [], []
         
         # trial
-        if self.add_flow_stream:
+        if self.add_flow_stream or self.add_flow_adjacency:
             y = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
+            if self.add_flow_adjacency:
+                A_dyn = self.flow_adj_module(y)
         
         if self.use_frame_diff:
             y = self._kp_diff_stats(keypoints)
@@ -467,7 +478,10 @@ class DE_GCN(nn.Module):
         x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
         x_ = x
         for i, (stream, fc) in enumerate(zip(self.streams, self.fc)):
-            x_s = stream(x_) # (N*M, C', T', V')
+            if not self.add_flow_adjacency:
+                x_s = stream(x_) # (N*M, C', T', V')
+            else:
+                x_s = stream(x_, A_dyn)
             c_new = x_s.size(1)
             x_pooled = x_s.reshape(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
             x_d = self.drop_out(x_pooled)
@@ -484,7 +498,10 @@ class DE_GCN(nn.Module):
             y = y.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
             y_ = y
             for i, (stream, fc) in enumerate(zip(self.streams_flow, self.fc_flow)):
-                y_s = stream(y_) # (N*M, C', T', V')
+                if not self.add_flow_adjacency:
+                    y_s = stream(y_) # (N*M, C', T', V')
+                else:
+                    y_s = stream(y_, A_dyn)
                 c_new = y_s.size(1)
                 y_pooled = y_s.reshape(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
                 y_d = self.drop_out(y_pooled)

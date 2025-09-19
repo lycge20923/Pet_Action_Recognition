@@ -209,7 +209,7 @@ class ModelArguments:
         default="GCN",
         metadata={"help":"Sub directory to store pretrained weights for ST_GCN(self-training)"}
     )
-    gcn_model_name: Literal["stgcn", "tdgcn", "degcn"] = field(
+    gcn_model_name: Literal["stgcn", "tdgcn", "degcn", "infogcn"] = field(
         default="degcn",
         metadata={"help": "The model for training and predict. Now we only have ST-GCN & TD-GCN"}
     )
