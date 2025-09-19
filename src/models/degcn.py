@@ -247,7 +247,6 @@ class Basic_Block(nn.Module):
         self.relu = nn.LeakyReLU(LEAKY_ALPHA)
         init_param(self.modules())
     
-    # def forward(self, x):
     def forward(self, x):
         res = x
         x = self.gcn(x)
@@ -301,7 +300,7 @@ class DE_GCN(nn.Module):
             self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels_flow)
         
         if self.use_frame_diff:
-            assert not (self.add_flow_stream)
+            assert not self.add_flow_stream
             in_channels = 2
             self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels)
         

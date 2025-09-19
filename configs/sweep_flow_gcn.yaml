@@ -5,9 +5,9 @@ metric:
   goal: maximize
 parameters:
   fold_num:
-    values: [0]
+    values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["exp"]
+    values: ["formal:add flow stream"]
   epochs:
     values: [2000]
   patient_epochs:
@@ -17,7 +17,5 @@ parameters:
   add_I3D_branch:
     values: [False]
   # other parameters...
-  add_flow_adjacency:
-    values: [False]
   # add_flow_stream:
   #   values: [False]

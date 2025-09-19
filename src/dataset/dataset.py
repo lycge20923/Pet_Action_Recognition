@@ -28,7 +28,7 @@ class KpOfDataset(Dataset):
         self.data_params = data_params
         self.aug_params = aug_params
         self.model_params = model_params
-        self.kps_and_flow = (model_params.add_I3D_branch or (model_params.gcn_model_name == "degcn" and (model_params.add_flow_adjacency or model_params.add_flow_stream))) and (not model_params.use_frame_diff)
+        self.kps_and_flow = (model_params.add_I3D_branch or (model_params.gcn_model_name == "degcn" and model_params.add_flow_stream)) and (not model_params.use_frame_diff)
         self.only_flow = model_params.only_I3D_branch
         # self.extend_flow_to_kps = model_params.gcn_model_name == "degcn" and model_params.degcn_two_streams
 

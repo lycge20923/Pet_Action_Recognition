@@ -163,11 +163,6 @@ class ModelArguments:
         default=True,
         metadata={"help":"Add the stream which inputs are flow instead of coords"}
     )
-    # for ablation study
-    add_flow_adjacency: bool = field(
-        default=True,
-        metadata={"help":"Whether add leanable adjacency matrix from optical flow in the architecture in DE-GCN"}
-    )
     flow_statistic_mode: Literal["mean+std", "mean"] = field(
         default="mean+std",
         metadata={"help":"What kinds of statistic for sending the flow information."}
@@ -276,6 +271,10 @@ class ModelArguments:
     use_frame_diff: bool = field(
         default=False,
         metadata={"help": "This is for ablation study, for showing using information of optical flow is better"}
+    )
+    add_multiple_A: bool = field(
+        default=False,
+        metadata={"help":"Add streams for multiple A"}
     )
     
     
