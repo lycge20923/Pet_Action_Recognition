@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from .gcn.tools import *
 from .gcn.graph import Graph
 from ..utils.cli_args import ModelArguments, DataArguments
+from ..utils.common import kp_diff_stats
 
 LEAKY_ALPHA = 0.1
 def init_param(modules):
@@ -290,8 +291,6 @@ class DE_GCN(nn.Module):
         self.model_params = model_params
         self.data_params = data_params
         self.flow_block_size = model_params.flow_block_size
-        self.use_frame_diff = model_params.use_frame_diff
-        
         self.data_bn, self.streams, self.fc = self._init_streams(model_params.in_channels)
         
         self.add_flow_stream = model_params.add_flow_stream
@@ -299,6 +298,7 @@ class DE_GCN(nn.Module):
             in_channels_flow = 2 * model_params.flow_block_size * model_params.flow_block_size
             self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels_flow)
         
+        self.use_frame_diff = model_params.use_frame_diff
         if self.use_frame_diff:
             assert not self.add_flow_stream
             in_channels = 2
@@ -308,7 +308,7 @@ class DE_GCN(nn.Module):
             self.drop_out = nn.Dropout(drop_out)
         else:
             self.drop_out = lambda x: x  
-    
+
     def _init_streams(self, in_channels):
         data_bn = nn.BatchNorm1d(self.num_person * in_channels * self.data_params.num_nodes)
         bn_init(data_bn, 1)
@@ -337,22 +337,6 @@ class DE_GCN(nn.Module):
             nn.init.normal_(fc_.weight, 0, math.sqrt(2. / self.model_params.num_classes))
         
         return data_bn, streams, fc
-    
-    
-    def _kp_diff_stats(self, keypoints: torch.Tensor):
-        """
-        Args:
-            keypoints: (B, 3, T, J) – normalized (x, y, conf)
-        Returns:
-            flow_map: (B, 2, T, J)
-        """
-        # 只取 x,y；形狀 (B, 2, T, J)
-        xy = keypoints[:, :2, ...]
-        # 逐幀差分：Δx = x_t - x_{t-1}, Δy 同理；在 t=0 補 0
-        dxy = xy[:, :, 1:, :] - xy[:, :, :-1, :]                     # (B, 2, T-1, J)
-        zero = torch.zeros_like(dxy[:, :, :1, :])                    # (B, 2, 1,   J)
-        dxy = torch.cat([zero, dxy], dim=2)                          # (B, 2, T,   J)
-        return dxy
     
     def local_flow_stats(self, keypoints: torch.Tensor,
                         optical_flows: torch.Tensor,
@@ -451,7 +435,7 @@ class DE_GCN(nn.Module):
             y = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
         
         if self.use_frame_diff:
-            y = self._kp_diff_stats(keypoints)
+            y = kp_diff_stats(keypoints)
         
         # stream of coords
         x = x.unsqueeze(-1)

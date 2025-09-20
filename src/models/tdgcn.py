@@ -9,6 +9,7 @@ from torch.autograd import Variable
 from ..utils.cli_args import ModelArguments, DataArguments
 from .gcn.tools import *
 from .gcn.graph import Graph
+from ..utils.common import kp_diff_stats
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -127,7 +128,7 @@ class TDGC(nn.Module):
         super(TDGC, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        if in_channels == 3 or in_channels == 9:
+        if in_channels == 3 or in_channels == 2 or in_channels == 9:
             self.rel_channels = 8
             self.mid_channels = 16
         else:
@@ -297,12 +298,46 @@ class TD_GCN(nn.Module):
         self.fc = nn.Linear(model_params.base_channels*4, self.num_classes)
         nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / self.num_classes))
         bn_init(self.data_bn, 1)
+        
+        self.use_frame_diff = model_params.use_frame_diff
+        if self.use_frame_diff:
+            in_channels_diff = 2
+            self.data_bn_diff = nn.BatchNorm1d(num_person * in_channels_diff * self.num_nodes)
+            block_confs_diff = {
+                1: dict(in_c=in_channels_diff,      out_c=model_params.base_channels,      stride=1),
+                2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
+                3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
+                4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
+                5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
+                6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
+                7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
+                8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
+                9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
+                10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
+            }
+            self.blocks_diff = nn.ModuleList()
+            for idx in sorted(model_params.gcn_include_blocks):
+                conf = block_confs_diff[idx]
+                self.blocks_diff.append(
+                    TCN_GCN_unit(
+                        conf['in_c'], conf['out_c'],
+                        self.graph.A,
+                        stride=conf['stride'],
+                        adaptive=adaptive
+                    )
+                )
+            self.fc_diff = nn.Linear(model_params.base_channels*4, self.num_classes)
+            nn.init.normal_(self.fc_diff.weight, 0, math.sqrt(2. / self.num_classes))
+            bn_init(self.data_bn_diff, 1)
+        
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
         else:
-            self.drop_out = lambda x: x
+            self.drop_out = lambda x: x        
 
     def forward(self, x, flow: torch.Tensor=None):
+        keypoints = x.detach().clone()
+        
         if len(x.shape) == 3:
             N, T, VC = x.shape
             x = x.view(N, T, self.num_point, -1).permute(0, 3, 1, 2).contiguous().unsqueeze(-1)
@@ -318,7 +353,27 @@ class TD_GCN(nn.Module):
         c_new = x.size(1)
         x = x.view(N, M, c_new, -1)
         x = x.mean(3).mean(1)
-        feat = x
+        feats = x
         x = self.drop_out(x)
+        logits = self.fc(x)
+        
+        if self.use_frame_diff:
+            y = kp_diff_stats(keypoints)
+            y = y.unsqueeze(-1)
+            N, C, T, V, M = y.size()
+            y = y.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
+            y = self.data_bn_diff(y)
+            y = y.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
+            for block in self.blocks_diff:
+                y = block(y)
+            c_new = y.size(1)
+            y = y.view(N, M, c_new, -1)
+            y = y.mean(3).mean(1)
+            feats_y = y
+            y = self.drop_out(y)
+            logits_y = self.fc_diff(x)
+            
+            feats = torch.stack([feats, feats_y], dim=0).mean(dim=0)
+            logits = torch.stack([logits, logits_y], dim=0).mean(dim=0)
 
-        return feat, self.fc(x)
+        return feats, logits

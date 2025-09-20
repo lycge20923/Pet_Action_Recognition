@@ -2,6 +2,7 @@ import cv2
 import dataclasses
 from .cli_args import DataArguments, ModelArguments
 import os
+import torch
 
 def get_video_info(video_path:str) -> cv2.VideoCapture:
     '''
@@ -37,3 +38,19 @@ def saving_self_training_best_gcn_weights_path(data_params:DataArguments, model_
                                     model_params.gcn_weights_file_name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
+
+
+def kp_diff_stats(keypoints: torch.Tensor):
+    """
+    Args:
+        keypoints: (B, 3, T, J) – normalized (x, y, conf)
+    Returns:
+        dxy: (B, 2, T, J)
+    """
+    # 只取 x,y；形狀 (B, 2, T, J)
+    xy = keypoints[:, :2, ...]
+    # 逐幀差分：Δx = x_t - x_{t-1}, Δy 同理；在 t=0 補 0
+    dxy = xy[:, :, 1:, :] - xy[:, :, :-1, :]                     # (B, 2, T-1, J)
+    zero = torch.zeros_like(dxy[:, :, :1, :])                    # (B, 2, 1,   J)
+    dxy = torch.cat([zero, dxy], dim=2)                          # (B, 2, T,   J)
+    return dxy

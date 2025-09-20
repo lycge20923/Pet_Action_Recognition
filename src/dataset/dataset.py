@@ -30,7 +30,6 @@ class KpOfDataset(Dataset):
         self.model_params = model_params
         self.kps_and_flow = (model_params.add_I3D_branch or (model_params.gcn_model_name == "degcn" and model_params.add_flow_stream)) and (not model_params.use_frame_diff)
         self.only_flow = model_params.only_I3D_branch
-        # self.extend_flow_to_kps = model_params.gcn_model_name == "degcn" and model_params.degcn_two_streams
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -50,24 +49,20 @@ class KpOfDataset(Dataset):
         self.data_seg_num = data_seg_num
         for i in range(data_seg_num):
             setattr(self, f"dataset_{str(i)}", [])
-        # self.dataset = []
+        
         for idx, annotation in tqdm(enumerate(self.annotations), total=len(self.annotations)):
             sample = dict()
-            # feat_path = annotation["feature_file"]
-            # data = np.load(feat_path)
+                        
             if self.kps_and_flow or self.only_flow:
                 optical_flows_np = np.load(annotation["of_feature_file"])
-                # optical_flows_np = data["optical_flows"]
                 optical_flows_np = optical_flows_np.squeeze(axis=1) # T, 2, H, W
                 optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3) # 2, T, H, W
                 sample["optical_flows_np"] = optical_flows_np
                 
             if not self.only_flow:
-                # keypoints_np = data["keypoints"].astype(np.float32, copy=False)   # shape (T, V, 3)
                 keypoints_np = np.load(annotation["kp_feature_file"]).astype(np.float32, copy=False)
                 sample["keypoints_np"] = keypoints_np
             sample["video_name"] = annotation["video_name"]
-            # self.dataset.append(sample)
             getattr(self, f"dataset_{str(idx % data_seg_num)}").append(sample)
         if self.kps_and_flow or self.only_flow:
             del optical_flows_np
@@ -85,14 +80,13 @@ class KpOfDataset(Dataset):
         
         # trial loading complete at first time
         sample = getattr(self, f"dataset_{str(index % self.data_seg_num)}")[index // self.data_seg_num]
-        optical_flows_np = sample["optical_flows_np"] if (self.kps_and_flow or self.only_flow) else None
-        keypoints_np = sample["keypoints_np"] if (not self.only_flow) else None
         video_name = sample["video_name"]
-        
-        # --- transform to tensor --- 
-        # label
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)
         
+        optical_flows_np = sample["optical_flows_np"] if (self.kps_and_flow or self.only_flow) else None
+        keypoints_np = sample["keypoints_np"] if (not self.only_flow) else None
+        
+        # --- transform to tensor --- 
         if keypoints_np is not None:
             keypoints_tensor = torch.tensor(keypoints_np, dtype=torch.float32)
             # Permute to (C, T, V) -> Channels (coords), Time (frames), Vertices (joints)
@@ -140,7 +134,6 @@ class SiameseKpOfDataset(Dataset):
             y = 1.0
 
         kp2, flow2, lab2, _ = self.base[idx2]
-        
         y = torch.tensor(y, dtype=torch.float32)
         
         return (kp1, kp2), (flow1, flow2), (lab1, lab2), y
