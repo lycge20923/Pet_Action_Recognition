@@ -6,10 +6,11 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
-from ..utils.cli_args import ModelArguments, DataArguments
 from .gcn.tools import *
+from ..utils.cli_args import ModelArguments, DataArguments
 from .gcn.graph import Graph
 from ..utils.common import kp_diff_stats
+
 
 class TemporalConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, dilation=1):
@@ -77,7 +78,7 @@ class MultiScale_TemporalConv(nn.Module):
             nn.BatchNorm2d(branch_channels),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=(3,1), stride=(stride,1), padding=(1,0)),
-            nn.BatchNorm2d(branch_channels)  
+            nn.BatchNorm2d(branch_channels)  # 为什么还要加bn
         ))
 
         self.branches.append(nn.Sequential(
@@ -109,9 +110,9 @@ class MultiScale_TemporalConv(nn.Module):
         return out
 
 
-class TDGC(nn.Module):
-    def __init__(self, in_channels, out_channels, rel_reduction=8, mid_reduction=1): # r = 4 r = 16
-        super(TDGC, self).__init__()
+class CTRGC(nn.Module):
+    def __init__(self, in_channels, out_channels, rel_reduction=8, mid_reduction=1):
+        super(CTRGC, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         if in_channels == 3 or in_channels == 2 or in_channels == 9:
@@ -121,31 +122,21 @@ class TDGC(nn.Module):
             self.rel_channels = in_channels // rel_reduction
             self.mid_channels = in_channels // mid_reduction
         self.conv1 = nn.Conv2d(self.in_channels, self.rel_channels, kernel_size=1)
-        # This convolution (self.conv2) is redundant, 
-        # but when you want to use the weight files we provide for action recognition, you have to uncomment it!
-        # self.conv2 = nn.Conv2d(self.in_channels, self.rel_channels, kernel_size=1) 
+        self.conv2 = nn.Conv2d(self.in_channels, self.rel_channels, kernel_size=1)
         self.conv3 = nn.Conv2d(self.in_channels, self.out_channels, kernel_size=1)
         self.conv4 = nn.Conv2d(self.rel_channels, self.out_channels, kernel_size=1)
-
         self.tanh = nn.Tanh()
-
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 conv_init(m)
             elif isinstance(m, nn.BatchNorm2d):
                 bn_init(m, 1)
 
-    def forward(self, x, A=None, alpha=1, beta=1, gamma=0.1):
-
-        x1, x3 = self.conv1(x).mean(-2), self.conv3(x)
-        x1 = self.tanh(x1.unsqueeze(-1) - x1.unsqueeze(-2))
-        x1 = self.conv4(x1) * alpha + (A.unsqueeze(0).unsqueeze(0) if A is not None else 0)
+    def forward(self, x, A=None, alpha=1):
+        x1, x2, x3 = self.conv1(x).mean(-2), self.conv2(x).mean(-2), self.conv3(x)
+        x1 = self.tanh(x1.unsqueeze(-1) - x2.unsqueeze(-2))
+        x1 = self.conv4(x1) * alpha + (A.unsqueeze(0).unsqueeze(0) if A is not None else 0)  # N,C,V,V
         x1 = torch.einsum('ncuv,nctv->nctu', x1, x3)
-        x4 = self.tanh(x3.mean(-3).unsqueeze(-1) - x3.mean(-3).unsqueeze(-2))
-        x3 = x3.permute(0, 2, 1, 3)
-        x5 = torch.einsum('btmn,btcn->bctm', x4, x3)
-        x1 = x1 * beta  + x5 * gamma
-
         return x1
 
 class unit_tcn(nn.Module):
@@ -176,7 +167,7 @@ class unit_gcn(nn.Module):
         self.num_subset = A.shape[0]
         self.convs = nn.ModuleList()
         for i in range(self.num_subset):
-            self.convs.append(TDGC(in_channels, out_channels))
+            self.convs.append(CTRGC(in_channels, out_channels))
 
         if residual:
             if in_channels != out_channels:
@@ -192,13 +183,10 @@ class unit_gcn(nn.Module):
             self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)))
         else:
             self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
-        self.alpha = nn.Parameter(torch.zeros(1)) # No I
+        self.alpha = nn.Parameter(torch.zeros(1))
         self.bn = nn.BatchNorm2d(out_channels)
         self.soft = nn.Softmax(-2)
         self.relu = nn.ReLU(inplace=True)
-
-        self.beta = nn.Parameter(torch.tensor(0.5)) # 1.0 1.4 2.0
-        self.gamma = nn.Parameter(torch.tensor(0.1))
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -214,11 +202,12 @@ class unit_gcn(nn.Module):
         else:
             A = self.A.cuda(x.get_device())
         for i in range(self.num_subset):
-            z = self.convs[i](x, A[i], self.alpha, self.beta, self.gamma)
+            z = self.convs[i](x, A[i], self.alpha)
             y = z + y if y is not None else z
         y = self.bn(y)
         y += self.down(x)
         y = self.relu(y)
+
 
         return y
 
@@ -244,84 +233,73 @@ class TCN_GCN_unit(nn.Module):
         return y
 
 
-class TD_GCN(nn.Module):
-    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, drop_out=0, adaptive=True):
-        super(TD_GCN, self).__init__()
+class CTR_GCN(nn.Module):
+    # def __init__(self, num_class=60, num_point=25, num_person=2, graph=None, graph_args=dict(), in_channels=3,
+    #              drop_out=0, adaptive=True):
+    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, adaptive=True, drop_out=0):
+        super(CTR_GCN, self).__init__()
 
         self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
+        A = self.graph.A
 
-        A = self.graph.A # 3,25,25
+        self.num_class = model_params.num_classes
+        self.num_point = data_params.num_nodes
+        self.in_channels = model_params.in_channels
+        self.base_channels = model_params.base_channels
+        self.data_bn = nn.BatchNorm1d(num_person * self.in_channels * self.num_point)
 
-        self.num_classes = model_params.num_classes
-        self.num_nodes = data_params.num_nodes
-        self.data_bn = nn.BatchNorm1d(num_person * model_params.in_channels * self.num_nodes)
-        
-        block_confs = {
-            1: dict(in_c=model_params.in_channels,      out_c=model_params.base_channels,      stride=1),
-            2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
-            6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-            7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-            8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
-            9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-            10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-        }
-        
-        self.blocks = nn.ModuleList()
-        for idx in sorted(model_params.gcn_include_blocks):
-            conf = block_confs[idx]
-            self.blocks.append(
-                TCN_GCN_unit(
-                    conf['in_c'], conf['out_c'],
-                    self.graph.A,
-                    stride=conf['stride'],
-                    adaptive=adaptive
-                )
-            )
+        block_list = [
+            [self.in_channels, self.base_channels, 1, False],
+            [self.base_channels, self.base_channels, 1, True],
+            [self.base_channels, self.base_channels, 1, True],
+            [self.base_channels, self.base_channels, 1, True],
+            [self.base_channels, self.base_channels*2, 2, True],
+            [self.base_channels*2, self.base_channels*2, 1, True],
+            [self.base_channels*2, self.base_channels*2, 1, True],
+            [self.base_channels*2, self.base_channels*4, 2, True],
+            [self.base_channels*4, self.base_channels*4, 1, True],
+            [self.base_channels*4, self.base_channels*4, 1, True],
+        ]
+        blockargs = [block_list[int(i - 1)] for i in model_params.gcn_include_blocks]
+        self.blocks = nn.ModuleList([
+            TCN_GCN_unit(ic, oc, A, stride=s, residual=r, adaptive=adaptive) for ic, oc, s, r in blockargs
+        ])
 
-        self.fc = nn.Linear(model_params.base_channels*4, self.num_classes)
-        nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / self.num_classes))
+        self.fc = nn.Linear(self.base_channels*4, self.num_class)
+        nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / self.num_class))
         bn_init(self.data_bn, 1)
-        
+
         self.use_frame_diff = model_params.use_frame_diff
         if self.use_frame_diff:
             in_channels_diff = 2
-            self.data_bn_diff = nn.BatchNorm1d(num_person * in_channels_diff * self.num_nodes)
-            block_confs_diff = {
-                1: dict(in_c=in_channels_diff,      out_c=model_params.base_channels,      stride=1),
-                2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-                3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-                4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-                5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
-                6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-                7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-                8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
-                9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-                10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-            }
-            self.blocks_diff = nn.ModuleList()
-            for idx in sorted(model_params.gcn_include_blocks):
-                conf = block_confs_diff[idx]
-                self.blocks_diff.append(
-                    TCN_GCN_unit(
-                        conf['in_c'], conf['out_c'],
-                        self.graph.A,
-                        stride=conf['stride'],
-                        adaptive=adaptive
-                    )
-                )
-            self.fc_diff = nn.Linear(model_params.base_channels*4, self.num_classes)
-            nn.init.normal_(self.fc_diff.weight, 0, math.sqrt(2. / self.num_classes))
+            self.data_bn_diff = nn.BatchNorm1d(num_person * in_channels_diff * self.num_point)
+
+            block_list_diff = [
+                [in_channels_diff, self.base_channels, 1, False],
+                [self.base_channels, self.base_channels, 1, True],
+                [self.base_channels, self.base_channels, 1, True],
+                [self.base_channels, self.base_channels, 1, True],
+                [self.base_channels, self.base_channels*2, 2, True],
+                [self.base_channels*2, self.base_channels*2, 1, True],
+                [self.base_channels*2, self.base_channels*2, 1, True],
+                [self.base_channels*2, self.base_channels*4, 2, True],
+                [self.base_channels*4, self.base_channels*4, 1, True],
+                [self.base_channels*4, self.base_channels*4, 1, True],
+            ]
+            blockargs = [block_list_diff[int(i - 1)] for i in model_params.gcn_include_blocks]
+            self.blocks_diff = nn.ModuleList([
+                TCN_GCN_unit(ic, oc, A, stride=s, residual=r, adaptive=adaptive) for ic, oc, s, r in blockargs
+            ])
+            self.fc_diff = nn.Linear(self.base_channels*4, self.num_class)
+            nn.init.normal_(self.fc_diff.weight, 0, math.sqrt(2. / self.num_class))
             bn_init(self.data_bn_diff, 1)
         
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
         else:
-            self.drop_out = lambda x: x        
-
-    def forward(self, x, flow: torch.Tensor=None):
+            self.drop_out = lambda x: x
+            
+    def forward(self, x, flow=None):
         keypoints = x.detach().clone()
         
         if len(x.shape) == 3:
@@ -335,7 +313,8 @@ class TD_GCN(nn.Module):
         x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
         for block in self.blocks:
             x = block(x)
-            
+
+        # N*M,C,T,V
         c_new = x.size(1)
         x = x.view(N, M, c_new, -1)
         x = x.mean(3).mean(1)
@@ -347,6 +326,7 @@ class TD_GCN(nn.Module):
             y = kp_diff_stats(keypoints)
             y = y.unsqueeze(-1)
             N, C, T, V, M = y.size()
+
             y = y.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
             y = self.data_bn_diff(y)
             y = y.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
@@ -361,5 +341,5 @@ class TD_GCN(nn.Module):
             
             feats = torch.stack([feats, feats_y], dim=0).mean(dim=0)
             logits = torch.stack([logits, logits_y], dim=0).mean(dim=0)
-
+                    
         return feats, logits

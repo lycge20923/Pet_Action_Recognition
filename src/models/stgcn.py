@@ -294,11 +294,11 @@ class ST_GCN(nn.Module):
             
             # Global pooling + fc
             feat_4d = F.avg_pool2d(y, y.size()[2:])
-            feat_y = feat_4d.view(N, -1)
+            feats_y = feat_4d.view(N, -1)
             
             logits_y = self.fc_diff(feat_4d).view(N, -1)
             
-            feats = torch.stack([feats, feat_y], dim=0).mean(dim=0)
+            feats = torch.stack([feats, feats_y], dim=0).mean(dim=0)
             logits = torch.stack([logits, logits_y], dim=0).mean(dim=0)
         
         return feats, logits

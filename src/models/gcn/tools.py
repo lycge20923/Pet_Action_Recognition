@@ -1,5 +1,6 @@
 import numpy as np
 import torch.nn as nn
+import torch
 import math
 
 def import_class(name):
@@ -27,6 +28,19 @@ def conv_branch_init(conv, branches):
     nn.init.normal_(weight, 0, math.sqrt(2. / (n * k1 * k2 * branches)))
     if conv.bias is not None:
         nn.init.constant_(conv.bias, 0)
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        if hasattr(m, 'weight'):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out')
+        if hasattr(m, 'bias') and m.bias is not None and isinstance(m.bias, torch.Tensor):
+            nn.init.constant_(m.bias, 0)
+    elif classname.find('BatchNorm') != -1:
+        if hasattr(m, 'weight') and m.weight is not None:
+            m.weight.data.normal_(1.0, 0.02)
+        if hasattr(m, 'bias') and m.bias is not None:
+            m.bias.data.fill_(0)
     
 def activation_factory(name, inplace=True):
     if name == 'relu':
