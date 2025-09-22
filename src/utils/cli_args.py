@@ -402,7 +402,7 @@ class TrainingArguments:
         metadata={"help":"The root directory for saving files while training"}
     )
     patient_epochs: int = field(
-        default= 300, 
+        default= 500, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
     # for ablation study
