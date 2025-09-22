@@ -226,10 +226,6 @@ class ModelArguments:
         default=2, 
         metadata= {"help": "The number of streams used in DE-GCN"}
     )
-    load_gcn_weights: bool = field(
-        default=False, 
-        metadata={"help":"Whether continue training using pre-trained GCN model weights"}
-    )
     # stgcn related parameters
     stgcn_hop_size: int = field(
         default=1,

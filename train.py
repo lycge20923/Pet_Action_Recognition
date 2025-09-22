@@ -239,15 +239,18 @@ def build_model_and_optimizer(model_params:ModelArguments,
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=train_params.scheduler_eta_min)
     
     if train_params.resume_checkpoint_dir != None:
+        print(f"Trying load checkpoint from {train_params.resume_checkpoint_dir}")
         try:
             checkpoint_names = [f for f in os.listdir(train_params.resume_checkpoint_dir) if f.endswith(".pth")]
             checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
             checkpoint_path = os.path.join(train_params.resume_checkpoint_dir, checkpoint_name)
             ckpt = torch.load(checkpoint_path, map_location=train_params.device)
             if not train_params.add_contrastive_loss:
-                model.load_state_dict(ckpt["model_state_dict"])
+                info = model.load_state_dict(ckpt["model_state_dict"], strict=False)
             else:
-                model.backbone.load_state_dict(ckpt["model_state_dict"])
+                info = model.backbone.load_state_dict(ckpt["model_state_dict"], strict=False)
+            print("Missing keys:", info.missing_keys)
+            print("Unexpected keys:", info.unexpected_keys)
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         except Exception as e:
             print(f"Fails to load pre-trained weights, try to re-train")
