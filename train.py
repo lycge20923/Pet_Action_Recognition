@@ -270,7 +270,7 @@ def build_model_and_optimizer(model_params:ModelArguments,
         try:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         except:
-            print(f"Fails to load pre-trained optimizer in {checkpoint_path}, try to re-train")
+            print(f"Fails to load pre-trained optimizer in {checkpoint_path}, try to re-set")
         
     # except Exception as e:
     #     print(f"Fails to load pre-trained weights, try to re-train")
