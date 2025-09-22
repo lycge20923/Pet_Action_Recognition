@@ -272,10 +272,6 @@ class ModelArguments:
         default=False,
         metadata={"help": "This is for ablation study, for showing using information of optical flow is better"}
     )
-    add_multiple_A: bool = field(
-        default=False,
-        metadata={"help":"Add streams for multiple A"}
-    )
     
     
 @dataclass
@@ -410,7 +406,7 @@ class TrainingArguments:
         metadata={"help":"The root directory for saving files while training"}
     )
     patient_epochs: int = field(
-        default= 200, 
+        default= 100, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
     # for ablation study

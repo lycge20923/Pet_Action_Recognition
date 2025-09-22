@@ -7,7 +7,7 @@ parameters:
   fold_num:
     values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["compare: gcns"]
+    values: ["compare: gcns(include diff)"]
   epochs:
     values: [2000]
   batch_size:
@@ -17,5 +17,7 @@ parameters:
   # other parameters...
   add_flow_stream:
     values: [False]
+  use_frame_diff:
+    values: [True]
   gcn_model_name:
-    values: ["infogcn"]
+    values: ["stgcn", "tdgcn", "degcn", "infogcn", "ctrgcn"]
