@@ -358,7 +358,7 @@ class TrainingArguments:
     )
 
     epochs: int = field(
-        default=300,
+        default=500,
         metadata={"help": "Total number of training epochs. For only training GCN, it is recommended to change to at least 1000"}
     )
     batch_size: int = field(
@@ -402,7 +402,7 @@ class TrainingArguments:
         metadata={"help":"The root directory for saving files while training"}
     )
     patient_epochs: int = field(
-        default= 500, 
+        default= 200, 
         metadata={"help":"If the performance is not good for a long time, terminate it!"}
     )
     # for ablation study
