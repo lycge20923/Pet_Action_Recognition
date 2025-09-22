@@ -168,7 +168,7 @@ class ModelArguments:
         metadata={"help":"What kinds of statistic for sending the flow information."}
     )
     flow_block_size: int = field(
-        default=3,
+        default=5,
         metadata={"help":"The patch size of the flow for each keypoints"}
     )
 
