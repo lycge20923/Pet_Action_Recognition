@@ -21,7 +21,7 @@ class ActionRecognitionModel(nn.Module):
                  data_params:DataArguments,
                  aug_params:AugmentationArguments = None,
                  coords = None):
-        super().__init__()
+        super(ActionRecognitionModel, self).__init__()
         self.only_I3D_branch = model_params.only_I3D_branch
         self.add_I3D_branch = model_params.add_I3D_branch
         
@@ -66,8 +66,10 @@ class ActionRecognitionModel(nn.Module):
         # for using both skeleton and optical flow, we should load the pretrained weights of GCN
         if (model_params.load_gcn_weights or self.add_I3D_branch) and not self.only_I3D_branch:
             gcn_weights_path = saving_self_training_best_gcn_weights_path(data_params, model_params)
-            self.skel_model.load_state_dict(torch.load(gcn_weights_path))            
-            
+            ckpt = torch.load(gcn_weights_path)
+            info = self.load_state_dict(ckpt["model_state_dict"], strict=False)            
+            print("Missing keys:", info.missing_keys)
+            print("Unexpected keys:", info.unexpected_keys)
         
         # concate feature's size, for final classifier
         self.total_feature_dimension = self._skel_feat_dim
