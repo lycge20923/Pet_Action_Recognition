@@ -62,14 +62,6 @@ class ActionRecognitionModel(nn.Module):
             self._flow_feat_dim = model_params.I3D_raw_feat_dim
             self._projected_flow_feat_dim = model_params.I3D_project_dim
             self.flow_feature_projector = nn.Linear(self._flow_feat_dim, self._projected_flow_feat_dim)
-
-        # for using both skeleton and optical flow, we should load the pretrained weights of GCN
-        if self.add_I3D_branch and not self.only_I3D_branch:
-            gcn_weights_path = saving_self_training_best_gcn_weights_path(data_params, model_params)
-            ckpt = torch.load(gcn_weights_path)
-            info = self.load_state_dict(ckpt["model_state_dict"], strict=False)            
-            print("Missing keys:", info.missing_keys)
-            print("Unexpected keys:", info.unexpected_keys)
         
         # concate feature's size, for final classifier
         self.total_feature_dimension = self._skel_feat_dim

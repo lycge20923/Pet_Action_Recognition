@@ -238,22 +238,42 @@ def build_model_and_optimizer(model_params:ModelArguments,
     
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=train_params.scheduler_eta_min)
     
-    if train_params.resume_checkpoint_dir != None:
-        print(f"Trying load checkpoint from {train_params.resume_checkpoint_dir}")
-        try:
+    # load pretrained weights
+    if train_params.resume_checkpoint_dir != None or (model_params.add_I3D_branch and not model_params.only_I3D_branch):
+        if train_params.resume_checkpoint_dir != None:
+            print(f"Trying load checkpoint from {train_params.resume_checkpoint_dir}")
             checkpoint_names = [f for f in os.listdir(train_params.resume_checkpoint_dir) if f.endswith(".pth")]
             checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
             checkpoint_path = os.path.join(train_params.resume_checkpoint_dir, checkpoint_name)
+        else: # for pre-train the gcn branch
+            checkpoint_path = saving_self_training_best_gcn_weights_path(data_params, model_params)
+            print(f"Trying load checkpoint from {checkpoint_path}")
+        
+        # load weights
+        try:
             ckpt = torch.load(checkpoint_path, map_location=train_params.device)
-            if not train_params.add_contrastive_loss:
-                info = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+            state_dict = ckpt["model_state_dict"]
+            model_final_weight_size = model.final_classifier.weight.shape[1] if not train_params.add_contrastive_loss else model.backbone.final_classifier.weight.shape[1]
+            ckpt_final_weight_size = state_dict["final_classifier.weight"].shape[1]
+            if model_final_weight_size != ckpt_final_weight_size:
+                state_dict = {k: v for k, v in state_dict.items() if ("final_classifier" not in k)}
+            if not train_params.add_contrastive_loss:   
+                info = model.load_state_dict(state_dict, strict=False)
             else:
-                info = model.backbone.load_state_dict(ckpt["model_state_dict"], strict=False)
+                info = model.backbone.load_state_dict(state_dict, strict=False)
             print("Missing keys:", info.missing_keys)
             print("Unexpected keys:", info.unexpected_keys)
+        except:
+            print(f"Fails to load pre-trained weights in {checkpoint_path}, try to re-train")
+       
+        # load optimizer
+        try:
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        except Exception as e:
-            print(f"Fails to load pre-trained weights, try to re-train")
+        except:
+            print(f"Fails to load pre-trained optimizer in {checkpoint_path}, try to re-train")
+        
+    # except Exception as e:
+    #     print(f"Fails to load pre-trained weights, try to re-train")
     
     return {"loss":{"cross entropy": cross_entropy_loss, "contrastive learning": contrastive_loss}, "model":model, "optimizer":optimizer, "scheduler":scheduler}
 
