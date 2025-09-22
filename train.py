@@ -271,9 +271,6 @@ def build_model_and_optimizer(model_params:ModelArguments,
             optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         except:
             print(f"Fails to load pre-trained optimizer in {checkpoint_path}, try to re-set")
-        
-    # except Exception as e:
-    #     print(f"Fails to load pre-trained weights, try to re-train")
     
     return {"loss":{"cross entropy": cross_entropy_loss, "contrastive learning": contrastive_loss}, "model":model, "optimizer":optimizer, "scheduler":scheduler}
 
