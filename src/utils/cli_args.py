@@ -439,7 +439,7 @@ class TrainingArguments:
         metadata={"help": "Since we use multiple branch, \
             thus we experiment for different learning rate for different branches"}
     )
-    branch_stgcn_learning_rate: float = field(
+    branch_gcn_learning_rate: float = field(
         default=3e-5,
         metadata={"help":"If use 'use_multiplie_learning_rates', then this \
             indicate the learning rate for stgcn branch"}

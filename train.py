@@ -215,24 +215,24 @@ def build_model_and_optimizer(model_params:ModelArguments,
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
     if train_params.use_multiplie_learning_rates and (not model_params.only_I3D_branch): 
         all_params = set(model.parameters())
-        stgcn_params = list(base_model.skel_model.parameters())
-        stgcn_set = set(stgcn_params)
+        gcn_params = list(base_model.skel_model.parameters())
+        gcn_set = set(gcn_params)
         if model_params.add_I3D_branch:
             i3d_params = list(base_model.I3D.parameters())
             i3d_set = set(i3d_params)
 
             # calculate for fuse head
-            fuse_head_params = list(all_params - stgcn_set - i3d_set)
+            fuse_head_params = list(all_params - gcn_set - i3d_set)
             
             optimizer = torch.optim.SGD([
-            {'params': stgcn_params, 'lr': train_params.branch_stgcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
+            {'params': gcn_params, 'lr': train_params.branch_gcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
             {'params': i3d_params, 'lr': train_params.branch_I3D_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # I3D branch
             {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay},         # fuse head branch
             ], momentum=train_params.momentum)
         else:
-            fuse_head_params = list(all_params - stgcn_set)
+            fuse_head_params = list(all_params - gcn_set)
             optimizer = torch.optim.SGD([
-            {'params': stgcn_params, 'lr': train_params.branch_stgcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
+            {'params': gcn_params, 'lr': train_params.branch_gcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
             {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # others
             ], momentum=train_params.momentum)
     
