@@ -243,7 +243,10 @@ class Info_GCN(nn.Module):
         self.z_prior = torch.empty(self.num_class, base_channel*4)
         self.A_vector = self.get_A(self.graph, k)
         self.gain = gain
-        self.to_joint_embedding = nn.Linear(model_params.in_channels, base_channel)
+        
+        self.is_frame_diff_stream = model_params.is_frame_diff_stream
+        self.in_channels = model_params.in_channels if not self.is_frame_diff_stream else 2
+        self.to_joint_embedding = nn.Linear(self.in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         
         block_list = [
@@ -274,26 +277,6 @@ class Info_GCN(nn.Module):
         nn.init.normal_(self.decoder.weight, 0, math.sqrt(2. / self.num_class))
         bn_init(self.data_bn, 1)
         
-        self.use_frame_diff = model_params.use_frame_diff
-        if self.use_frame_diff:
-            in_channels_diff = 2
-            self.to_joint_embedding_diff = nn.Linear(in_channels_diff, base_channel)
-            self.pos_embedding_diff = nn.Parameter(torch.randn(1, self.num_point, base_channel))
-            self.data_bn_diff = nn.BatchNorm1d(num_person * base_channel * self.num_point)
-            self.blocks_diff = nn.ModuleList([
-                EncodingBlock(in_channels=ic, out_channels=oc, A=A, stride=s) for ic, oc, s in blockargs
-            ])
-            self.fc_diff = nn.Linear(base_channel*4, base_channel*4)
-            self.fc_mu_diff = nn.Linear(base_channel*4, base_channel*4)
-            self.fc_logvar_diff = nn.Linear(base_channel*4, base_channel*4)
-            self.decoder_diff = nn.Linear(base_channel*4, self.num_class)
-            
-            nn.init.xavier_uniform_(self.fc_diff.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.xavier_uniform_(self.fc_mu_diff.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.xavier_uniform_(self.fc_logvar_diff.weight, gain=nn.init.calculate_gain('relu'))
-            nn.init.normal_(self.decoder_diff.weight, 0, math.sqrt(2. / self.num_class))
-            bn_init(self.data_bn_diff, 1)    
-        
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
         else:
@@ -317,6 +300,8 @@ class Info_GCN(nn.Module):
 
     def forward(self, x:torch.Tensor, flow:torch.Tensor=None):
         keypoints = x.detach().clone()
+        if self.is_frame_diff_stream:
+            x = kp_diff_stats(keypoints)
         
         x = x.unsqueeze(dim=-1)
         N, C, T, V, M = x.size()
@@ -344,37 +329,5 @@ class Info_GCN(nn.Module):
         feats = self.latent_sample(z_mu, z_logvar)
 
         logits = self.decoder(feats)
-        
-        if self.use_frame_diff:
-            y = kp_diff_stats(keypoints)
-            y = y.unsqueeze(dim=-1)
-            N, C, T, V, M = y.size()
-            y = rearrange(y, 'n c t v m -> (n m t) v c', m=M, v=V).contiguous()
-            y = self.A_vector.to(device=y.device, dtype=y.dtype).expand(N*M*T, -1, -1) @ y
-
-            y = self.to_joint_embedding_diff(y)
-            y += self.pos_embedding_diff[:, :self.num_point]
-            y = rearrange(y, '(n m t) v c -> n (m v c) t', m=M, t=T).contiguous()
-
-            y = self.data_bn_diff(y)
-            y = rearrange(y, 'n (m v c) t -> (n m) c t v', m=M, v=V).contiguous()
-            for block in self.blocks_diff:
-                y = block(y)
-                
-            # N*M,C,T,V
-            c_new = y.size(1)
-            y = y.view(N, M, c_new, -1)
-            y = y.mean(3).mean(1)
-            y = F.relu(self.fc_diff(y))
-            y = self.drop_out(y)
-
-            z_mu = self.fc_mu_diff(y)
-            z_logvar = self.fc_logvar_diff(y)
-            feats_y = self.latent_sample(z_mu, z_logvar)
-            logits_y = self.decoder_diff(feats_y)
-            
-            feats = torch.stack([feats, feats_y], dim=0).mean(dim=0)
-            logits = torch.stack([logits, logits_y], dim=0).mean(dim=0)
-            
 
         return feats, logits

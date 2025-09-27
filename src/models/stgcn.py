@@ -195,11 +195,13 @@ class ST_GCN(nn.Module):
         self.register_buffer('A', A)
         A_size = A.size()  # (3, V, V)
         # BN over input channels * V
-        self.bn = nn.BatchNorm1d(model_params.in_channels * A_size[1])
+        self.is_frame_diff_stream = model_params.is_frame_diff_stream
+        self.in_channels = model_params.in_channels if not self.is_frame_diff_stream else 2
+        self.bn = nn.BatchNorm1d(self.in_channels * A_size[1])
         
         # STGC blocks
         block_confs = {
-            1: dict(in_c=model_params.in_channels,      out_c=model_params.base_channels,      stride=1),
+            1: dict(in_c=self.in_channels,      out_c=model_params.base_channels,      stride=1),
             2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
             3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
             4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
@@ -227,40 +229,11 @@ class ST_GCN(nn.Module):
         # Prediction head
         self.fc = nn.Conv2d(model_params.base_channels*4, model_params.num_classes, kernel_size=1)
         
-        # add frame diff
-        self.use_frame_diff = model_params.use_frame_diff
-        if self.use_frame_diff:
-            in_channels_diff = 2
-            self.bn_diff = nn.BatchNorm1d(in_channels_diff * A_size[1])
-            block_confs_diff = {
-                1: dict(in_c=in_channels_diff,      out_c=model_params.base_channels,      stride=1),
-                2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-                3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-                4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-                5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
-                6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-                7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-                8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
-                9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-                10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-            }
-            self.blocks_diff = nn.ModuleList()
-            for idx in sorted(model_params.gcn_include_blocks):
-                conf = block_confs_diff[idx]
-                self.blocks_diff.append(
-                    STGC_block(
-                        conf['in_c'], conf['out_c'],
-                        stride=conf['stride'],
-                        t_kernel_size=model_params.t_kernel_size,
-                        A_size=A_size,
-                        dilation=model_params.stgcn_dilation
-                    )
-                )
-            # Prediction head
-            self.fc_diff = nn.Conv2d(model_params.base_channels*4, model_params.num_classes, kernel_size=1)
-
     def forward(self, x: torch.Tensor, flow: torch.Tensor=None) -> torch.Tensor:
         keypoints = x.detach().clone()
+        
+        if self.is_frame_diff_stream:
+            x = kp_diff_stats(keypoints)
         
         N, C, T, V = x.size()
         
@@ -278,27 +251,5 @@ class ST_GCN(nn.Module):
         feats = feat_4d.view(N, -1)
         
         logits = self.fc(feat_4d).view(N, -1)
-        
-        if self.use_frame_diff:
-            y = kp_diff_stats(keypoints)
-            N, C, T, V = y.size()
-        
-            # BN
-            y = y.permute(0, 3, 1, 2).contiguous().view(N, V * C, T)
-            y = self.bn_diff(y)
-            y = y.view(N, V, C, T).permute(0, 2, 3, 1).contiguous()
-            
-            # STGC blocks
-            for block in self.blocks_diff:
-                y = block(y, self.A)
-            
-            # Global pooling + fc
-            feat_4d = F.avg_pool2d(y, y.size()[2:])
-            feats_y = feat_4d.view(N, -1)
-            
-            logits_y = self.fc_diff(feat_4d).view(N, -1)
-            
-            feats = torch.stack([feats, feats_y], dim=0).mean(dim=0)
-            logits = torch.stack([logits, logits_y], dim=0).mean(dim=0)
         
         return feats, logits

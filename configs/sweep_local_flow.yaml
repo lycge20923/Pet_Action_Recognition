@@ -7,11 +7,13 @@ parameters:
   fold_num:
     values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["formal:only I3D"]
-  only_I3D_branch:
+    values: ["formal: local flow stream"]
+  epochs:
+    values: [2000]
+  patient_epochs:
+    values: [500]
+  batch_size:
+    values: [32]
+  is_local_flow_stream:
     values: [True]
   # other parameters...
-  epochs:
-    values: [300]
-  patient_epochs:
-    values: [200]

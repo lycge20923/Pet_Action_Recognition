@@ -22,8 +22,9 @@ class ActionRecognitionModel(nn.Module):
                  aug_params:AugmentationArguments = None,
                  coords = None):
         super(ActionRecognitionModel, self).__init__()
-        self.only_I3D_branch = model_params.only_I3D_branch
-        self.add_I3D_branch = model_params.add_I3D_branch
+        assert sum([model_params.is_local_flow_stream, model_params.is_frame_diff_stream, model_params.is_I3D_stream]) < 2,\
+            "Train one stream at one time"
+        self.is_I3D_stream = model_params.is_I3D_stream
         self.final_feature_dim = 0
         
         # augmentation
@@ -31,7 +32,8 @@ class ActionRecognitionModel(nn.Module):
         
         # initiate skeleton model
         self.skel_model = None
-        if not self.only_I3D_branch: # at least we use skeleton information 
+        if not self.is_I3D_stream: # at least we use skeleton information 
+            print("use skele model")
             if model_params.gcn_model_name == "tdgcn":
                 self.skel_model = TD_GCN(model_params=model_params, data_params=data_params)
                 self._skel_feat_dim = self.skel_model.fc.in_features
@@ -50,8 +52,8 @@ class ActionRecognitionModel(nn.Module):
             self.final_feature_dim = self._skel_feat_dim
             
         # initiate I3D
-        self.I3D = None
-        if self.add_I3D_branch or self.only_I3D_branch:
+        else:
+            print("use i3d model")
             self.I3D = InceptionI3d(in_channels=2, num_classes=model_params.num_classes)
             
             # load weight 
@@ -74,16 +76,6 @@ class ActionRecognitionModel(nn.Module):
             self.flow_feature_projector = nn.Linear(model_params.I3D_raw_feat_dim, self._projected_flow_feat_dim)
             self.final_feature_dim = self._projected_flow_feat_dim
         
-        # Both
-        if (self.add_I3D_branch) and (not self.only_I3D_branch):
-            if self._projected_flow_feat_dim == self._skel_feat_dim:
-                self.final_feature_dim = self._projected_flow_feat_dim
-            else:
-                raise ValueError("The dim of skeleton model and I3D should be same")
-            self.norm_skel = nn.LayerNorm(self.final_feature_dim)
-            self.norm_i3d  = nn.LayerNorm(self.final_feature_dim)
-            self.gate_logits = nn.Parameter(torch.zeros(self.final_feature_dim))
-        
         # final classifier
         self.final_classifier = nn.Linear(self.final_feature_dim, model_params.num_classes)
     
@@ -92,29 +84,18 @@ class ActionRecognitionModel(nn.Module):
         # conduct augmentation
         skeleton, flow = self.aug_module(skeleton, flow)
         
-        # 1. only optical flow
-        if self.only_I3D_branch or self.add_I3D_branch:
-            flow_feat, flow_logits = self.I3D(flow)
-            projected_flow_feat = self.flow_feature_projector(flow_feat)
-            if self.only_I3D_branch:
-                main_task_logits = self.final_classifier(projected_flow_feat)
-                return projected_flow_feat, main_task_logits, None, None
+        # I3D stream
+        if self.is_I3D_stream:
+            I3D_feat, _ = self.I3D(flow)
+            feat = self.flow_feature_projector(I3D_feat)
         
-        # 2. at least use skeleton information
-        skel_feat, skel_logits = self.skel_model(skeleton, flow)
-        both_skel_logits, both_flow_logits = None, None # aux
-        combined_feat = skel_feat
-        if self.add_I3D_branch:
-            s = self.norm_skel(skel_feat)
-            v = self.norm_i3d(projected_flow_feat)
-            alpha = torch.sigmoid(self.gate_logits).view(1, -1).expand_as(s)
-            combined_feat = alpha * s + (1.0 - alpha) * v 
+        # skeleton stream
+        else:
+            skel_feat, _ = self.skel_model(skeleton, flow)
+            feat = skel_feat
             
-            # for aux loss
-            both_skel_logits, both_flow_logits = skel_logits, flow_logits
-
-        main_task_logits = self.final_classifier(combined_feat)
-        return combined_feat, main_task_logits, both_skel_logits, both_flow_logits
+        main_task_logits = self.final_classifier(feat)
+        return feat, main_task_logits
 
 class ContrastiveActionWrapper(nn.Module):
     def __init__(self, backbone: ActionRecognitionModel, emb_dim:int):
@@ -128,33 +109,6 @@ class ContrastiveActionWrapper(nn.Module):
         feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow, labels=labels)
     '''
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
-        feat_from_backbone, main_logits, both_skel_logits, both_flow_logits = self.backbone(skeleton, flow=flow)
+        feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
-        return emb, main_logits, both_skel_logits, both_flow_logits
-
-if __name__ == "__main__":
-    import numpy as np 
-    model_params, data_params = ModelArguments(), DataArguments()
-    coords = np.load(os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name))
-    act_model = ActionRecognitionModel(model_params, data_params, coords=coords)
-    act_model.eval()
-
-    # --- begin test for I3D.extract_features output shape ---
-    # Create a dummy flow tensor of shape (batch, channels=2, frames, H, W)
-    # You can substitute data_args.num_samples and your actual spatial size
-    B, C, T = 1, 2, data_params.num_samples
-    H, W = 224, 224  # or whatever your flow input size is
-    dummy_flow = torch.randn(B, C, T, H, W)
-
-    with torch.no_grad():
-        flow_map = act_model.I3D.extract_features(dummy_flow)
-    print("I3D.extract_features returned a tensor of shape:", flow_map.shape)
-    # --- end test ---
-
-    # If you want to also see the feature‐vector after your pooling:
-    pooled = flow_map.mean(dim=2).view(B, -1)
-    print("After mean‐pooling over time and flattening:", pooled.shape)
-    
-    # for dim examination
-    print(act_model._skel_feat_dim, act_model._flow_feat_dim, act_model.total_feature_dimension)
-    
+        return emb, main_logits

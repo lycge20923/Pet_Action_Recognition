@@ -7,15 +7,11 @@ parameters:
   fold_num:
     values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["formal:add flow stream"]
+    values: ["formal:joints stream"]
   epochs:
     values: [2000]
   patient_epochs:
     values: [500]
   batch_size:
     values: [32]
-  add_I3D_branch:
-    values: [False]
   # other parameters...
-  # add_flow_stream:
-  #   values: [False]

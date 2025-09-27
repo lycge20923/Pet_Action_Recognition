@@ -10,14 +10,15 @@ import time
 from tqdm import tqdm
 import gc
 
-from ..utils.cli_args import DataArguments, ModelArguments, AugmentationArguments
+from ..utils.cli_args import DataArguments, AugmentationArguments
 from .aug_func import *
 
 class KpOfDataset(Dataset):
     def __init__(self,
                  data_params: DataArguments,
                  aug_params: AugmentationArguments,
-                 model_params: ModelArguments,
+                 load_kps: bool = True,
+                 load_flows: bool = False,
                  istrain: bool = True,
                  fold_num: int = 0,
                  data_seg_num: int = 6,
@@ -27,9 +28,9 @@ class KpOfDataset(Dataset):
         super().__init__()
         self.data_params = data_params
         self.aug_params = aug_params
-        self.model_params = model_params
-        self.kps_and_flow = (model_params.add_I3D_branch or (model_params.gcn_model_name == "degcn" and model_params.add_flow_stream)) and (not model_params.use_frame_diff)
-        self.only_flow = model_params.only_I3D_branch
+        
+        self.load_flows = load_flows
+        self.load_kps = load_kps
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -53,20 +54,20 @@ class KpOfDataset(Dataset):
         for idx, annotation in tqdm(enumerate(self.annotations), total=len(self.annotations)):
             sample = dict()
                         
-            if self.kps_and_flow or self.only_flow:
+            if self.load_flows:
                 optical_flows_np = np.load(annotation["of_feature_file"])
                 optical_flows_np = optical_flows_np.squeeze(axis=1) # T, 2, H, W
                 optical_flows_np = optical_flows_np.transpose(1, 0, 2, 3) # 2, T, H, W
                 sample["optical_flows_np"] = optical_flows_np
                 
-            if not self.only_flow:
+            if self.load_kps:
                 keypoints_np = np.load(annotation["kp_feature_file"]).astype(np.float32, copy=False)
                 sample["keypoints_np"] = keypoints_np
             sample["video_name"] = annotation["video_name"]
             getattr(self, f"dataset_{str(idx % data_seg_num)}").append(sample)
-        if self.kps_and_flow or self.only_flow:
+        if self.load_flows:
             del optical_flows_np
-        if not self.only_flow:
+        if self.load_kps:
             del keypoints_np 
         gc.collect()    
     
@@ -83,8 +84,8 @@ class KpOfDataset(Dataset):
         video_name = sample["video_name"]
         label = torch.tensor(self.annotations[index]["action_id"], dtype=torch.long)
         
-        optical_flows_np = sample["optical_flows_np"] if (self.kps_and_flow or self.only_flow) else None
-        keypoints_np = sample["keypoints_np"] if (not self.only_flow) else None
+        optical_flows_np = sample["optical_flows_np"] if self.load_flows else None
+        keypoints_np = sample["keypoints_np"] if self.load_kps else None
         
         # --- transform to tensor --- 
         if keypoints_np is not None:

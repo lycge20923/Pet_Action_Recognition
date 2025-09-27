@@ -290,19 +290,22 @@ class DE_GCN(nn.Module):
         self.num_person = num_person
         self.model_params = model_params
         self.data_params = data_params
-        self.flow_block_size = model_params.flow_block_size
-        self.data_bn, self.streams, self.fc = self._init_streams(model_params.in_channels)
         
-        self.add_flow_stream = model_params.add_flow_stream
-        if self.add_flow_stream:
-            in_channels_flow = 2 * model_params.flow_block_size * model_params.flow_block_size
-            self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels_flow)
-        
-        self.use_frame_diff = model_params.use_frame_diff
-        if self.use_frame_diff:
-            assert not self.add_flow_stream
+        # determine the stream type
+        self.is_local_flow_stream = model_params.is_local_flow_stream
+        self.is_frame_diff_stream = model_params.is_frame_diff_stream
+        if self.is_local_flow_stream:
+            print("Use local flow stream")
+            self.flow_block_size = model_params.flow_block_size
+            in_channels = 2 * model_params.flow_block_size * model_params.flow_block_size
+        elif self.is_frame_diff_stream:
+            print("Use frame diff stream")
             in_channels = 2
-            self.data_bn_flow, self.streams_flow, self.fc_flow = self._init_streams(in_channels)
+        else:
+            print("Use original keypoints stream")
+            in_channels = model_params.in_channels
+        
+        self.data_bn, self.streams, self.fc = self._init_streams(in_channels)
         
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
@@ -431,11 +434,13 @@ class DE_GCN(nn.Module):
         feats, logits_list = [], []
         
         # trial
-        if self.add_flow_stream:
-            y = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
+        if self.is_local_flow_stream:
+            print('use local_flow stream')
+            x = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
         
-        if self.use_frame_diff:
-            y = kp_diff_stats(keypoints)
+        elif self.is_frame_diff_stream:
+            print('use diff stream')
+            x = kp_diff_stats(keypoints)
         
         # stream of coords
         x = x.unsqueeze(-1)
@@ -452,23 +457,6 @@ class DE_GCN(nn.Module):
             logits = fc(x_d)                   # (N, num_class)
             feats.append(x_pooled)
             logits_list.append(logits)
-
-        # stream of flow
-        if self.add_flow_stream or self.use_frame_diff:
-            y = y.unsqueeze(-1)
-            N, C, T, V, M = y.size()
-            y = y.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
-            y = self.data_bn_flow(y)
-            y = y.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
-            y_ = y
-            for i, (stream, fc) in enumerate(zip(self.streams_flow, self.fc_flow)):
-                y_s = stream(y_) # (N*M, C', T', V')
-                c_new = y_s.size(1)
-                y_pooled = y_s.reshape(N, M, c_new, -1).mean(-1).mean(1)  # (N, C')
-                y_d = self.drop_out(y_pooled)
-                logits = fc(y_d)                   # (N, num_class)
-                feats.append(y_pooled)
-                logits_list.append(logits)
         
         # Average across streams
         feat = torch.stack(feats, dim=0).mean(dim=0)         # (N, C')

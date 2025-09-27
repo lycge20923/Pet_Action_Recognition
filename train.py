@@ -78,9 +78,11 @@ def prepare_dataloaders(data_params:DataArguments,
                         aug_params_eval:AugmentationArguments, 
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
-    
-    val_dataset = KpOfDataset(data_params, aug_params_eval, model_params, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
-    train_dataset = KpOfDataset(data_params, aug_params_train, model_params, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
+   
+    load_kps = not (model_params.is_I3D_stream)
+    load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream
+    val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
+    train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
     
     # calculate the dataset size
     train_size = len(train_dataset)
@@ -168,50 +170,20 @@ def build_model_and_optimizer(model_params:ModelArguments,
     
     # set optimizer and scheduler
     optimizer = torch.optim.SGD(model.parameters(), train_params.learning_rate, momentum=train_params.momentum, weight_decay=train_params.opt_weight_decay)
-    if train_params.use_multiplie_learning_rates and (not model_params.only_I3D_branch): 
-        all_params = set(model.parameters())
-        gcn_params = list(base_model.skel_model.parameters())
-        gcn_set = set(gcn_params)
-        if model_params.add_I3D_branch:
-            i3d_params = list(base_model.I3D.parameters())
-            i3d_set = set(i3d_params)
-
-            # calculate for fuse head
-            fuse_head_params = list(all_params - gcn_set - i3d_set)
-            
-            optimizer = torch.optim.SGD([
-            {'params': gcn_params, 'lr': train_params.branch_gcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
-            {'params': i3d_params, 'lr': train_params.branch_I3D_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # I3D branch
-            {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay},         # fuse head branch
-            ], momentum=train_params.momentum)
-        else:
-            fuse_head_params = list(all_params - gcn_set)
-            optimizer = torch.optim.SGD([
-            {'params': gcn_params, 'lr': train_params.branch_gcn_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # ST-GCN branch 
-            {'params': fuse_head_params,'lr': train_params.branch_fuse_head_learning_rate, 'weight_decay': train_params.opt_weight_decay}, # others
-            ], momentum=train_params.momentum)
     
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_params.epochs, eta_min=train_params.scheduler_eta_min)
     
     # load pretrained weights
-    if train_params.resume_checkpoint_dir != None or (model_params.add_I3D_branch and not model_params.only_I3D_branch):
-        if train_params.resume_checkpoint_dir != None:
-            print(f"Trying load checkpoint from {train_params.resume_checkpoint_dir}")
-            checkpoint_names = [f for f in os.listdir(train_params.resume_checkpoint_dir) if f.endswith(".pth")]
-            checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
-            checkpoint_path = os.path.join(train_params.resume_checkpoint_dir, checkpoint_name)
-        else: # for pre-train the gcn branch
-            checkpoint_path = saving_self_training_best_gcn_weights_path(data_params, model_params)
-            print(f"Trying load checkpoint from {checkpoint_path}")
+    if train_params.resume_checkpoint_dir != None:
+        print(f"Trying load checkpoint from {train_params.resume_checkpoint_dir}")
+        checkpoint_names = [f for f in os.listdir(train_params.resume_checkpoint_dir) if f.endswith(".pth")]
+        checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
+        checkpoint_path = os.path.join(train_params.resume_checkpoint_dir, checkpoint_name)
         
         # load weights
         try:
             ckpt = torch.load(checkpoint_path, map_location=train_params.device)
             state_dict = ckpt["model_state_dict"]
-            model_final_weight_size = model.final_classifier.weight.shape[1] if not train_params.add_contrastive_loss else model.backbone.final_classifier.weight.shape[1]
-            ckpt_final_weight_size = state_dict["final_classifier.weight"].shape[1]
-            if model_final_weight_size != ckpt_final_weight_size:
-                state_dict = {k: v for k, v in state_dict.items() if ("final_classifier" not in k)}
             if not train_params.add_contrastive_loss:   
                 info = model.load_state_dict(state_dict, strict=False)
             else:
@@ -255,21 +227,13 @@ def train_one_epoch(model,
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
             y = y.to(device)
-            emb1, logit1, skel_logits_1, flow_logits_1 = model(kp1, flow1)
-            emb2, logit2, skel_logits_2, flow_logits_2 = model(kp2 ,flow2)
+            emb1, logit1= model(kp1, flow1)
+            emb2, logit2 = model(kp2 ,flow2)
             
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
             loss_ce_part2 = cross_entropy_loss(logit2, lab2)
             batch_loss_ce = loss_ce_part1 + loss_ce_part2 
-            
-            # aux loss
-            if skel_logits_1 is not None and flow_logits_1 is not None:
-                aux_loss = cross_entropy_loss(skel_logits_1, lab1) + \
-                            cross_entropy_loss(flow_logits_1, lab1) + \
-                            cross_entropy_loss(skel_logits_2, lab2) + \
-                            cross_entropy_loss(flow_logits_2, lab2)
-                batch_loss_ce += 0.1 * aux_loss
             
             batch_loss_cl = contrastive_loss(emb1, emb2, y) * train_params.contrastive_loss_coefficient
             wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
@@ -302,15 +266,8 @@ def train_one_epoch(model,
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
-            _, output, skel_logits, flow_logits = model(kps, flow)
-
+            _, output = model(kps, flow)
             batch_loss_ce = cross_entropy_loss(output, label)
-            
-            # aux loss
-            if skel_logits is not None and flow_logits is not None:
-                batch_loss_ce += cross_entropy_loss(skel_logits, label) + \
-                            cross_entropy_loss(flow_logits, label)
-            
             batch_loss_total = batch_loss_ce
             
             batch_loss_total.backward() 
@@ -356,9 +313,9 @@ def val_one_epoch(model,
             label = label.to(device)
             
             if train_params.add_contrastive_loss:
-                _, output, _, _ = model.backbone(kps, flow)
+                _, output = model.backbone(kps, flow)
             else:
-                _, output, _, _ = model(kps, flow)
+                _, output = model(kps, flow)
             loss = cross_entropy_loss(output, label)
             current_batch_size = label.size(0)
             total_samples += current_batch_size

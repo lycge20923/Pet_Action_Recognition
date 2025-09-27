@@ -5,7 +5,9 @@ metric:
   goal: maximize
 parameters:
   fold_num:
-    values: [0]
+    values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["formal:flowgcn & I3D"]
+    values: ["formal:I3D stream"]
+  is_I3D_stream:
+    values: [True]
   # other parameters...

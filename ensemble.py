@@ -20,8 +20,10 @@ from src.models.model import ActionRecognitionModel
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Ensemble for Action Recognition')
-    parser.add_argument('--skeleton_checkpoint_dir', required=True, help="Skeleton model checkpoint dir")
-    parser.add_argument('--I3D_checkpoint_dir', required=True, help="I3D model checkpoint_dir")
+    parser.add_argument('--joints_stream_checkpoint_dir', default=None, help="Skeleton model(joints) checkpoint dir")
+    parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
+    parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
+    parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
     return parser.parse_args()
 
 def load_weights(dir_name:str):
@@ -29,20 +31,12 @@ def load_weights(dir_name:str):
     data_params = DataArguments()
     save_adjusted_args_name = train_params.save_adjusted_args_name
     adjusted_params_path = os.path.join(dir_name, save_adjusted_args_name)
-    if os.path.exists(adjusted_params_path):
-        with open(adjusted_params_path, 'r') as f:
-            adjusted_params = yaml.safe_load(f)
-        model_params = load_from_wandb(ModelArguments, adjusted_params)
-        fold_num = load_from_wandb(DataArguments, adjusted_params).fold_num
-    else:
-        model_params = ModelArguments() # adjust if needed
-        try:
-            fold_num = int(os.path.basename(os.path.dirname(dir_name))) # for those storing in models
-        except:
-            fold_num = 0
-        logger.warning("There is no 'args_adjusted.yaml' in the checkpoint dircetory.") 
-        logger.warning("You have to adjust predict.py to manually pass in the correct parameters.")
-
+    with open(adjusted_params_path, 'r') as f:
+        adjusted_params = yaml.safe_load(f)
+    
+    model_params = load_from_wandb(ModelArguments, adjusted_params)
+    
+    fold_num = load_from_wandb(DataArguments, adjusted_params).fold_num
     checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
     checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
     checkpoint_path = os.path.join(dir_name, checkpoint_name)
@@ -53,6 +47,10 @@ def load_weights(dir_name:str):
     return model, fold_num
 
 def main():
+    # args
+    args = parse_args()
+    
+    # load parameters
     global logger, train_params, data_params, device
     logger = setup_logger(file_path=__file__,level=logging.INFO)
     train_params = TrainingArguments()
@@ -61,22 +59,26 @@ def main():
     data_params = DataArguments()
     device = train_params.device
     
-    # args
-    args = parse_args()
-    
     # set seed 
     set_seed(train_params.seed)
     
     # load model
-    skeleton_model, fold_num_s = load_weights(dir_name=args.skeleton_checkpoint_dir)
-    I3D_model, fold_num_o = load_weights(dir_name=args.I3D_checkpoint_dir)
-    assert fold_num_s == fold_num_o, 'The fold number of both model should be the same'
-    skeleton_model.eval()
-    I3D_model.eval()
+    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir]
+    models, fold_nums = [], []
+    for model_dir in model_dirs:
+        if model_dir is not None:
+            model, fold_num = load_weights(dir_name=model_dir)
+            models.append(model)
+            fold_nums.append(fold_num)
+    if len(set(fold_nums)) == 1:
+        fold_num = fold_nums[0]
+    else:
+        raise ValueError('The fold number of all model should be the same')
     
     # load dataset
-    complete_model_params = ModelArguments()
-    val_dataset = KpOfDataset(data_params, aug_params_eval, complete_model_params, istrain=False, fold_num=fold_num_s)
+    load_kps = (args.I3D_checkpoint_dir is None)
+    load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir
+    val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_params.batch_size,
@@ -88,13 +90,13 @@ def main():
     
     # set output folder
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(output_params.output_dir, f"ensemble_{timestamp}_{fold_num_s}")
+    output_dir = os.path.join(output_params.output_dir, f"ensemble_{timestamp}_{fold_num}")
     os.makedirs(output_dir, exist_ok=True)
     
     # start eval
     test_correct = 0
     total_samples = 0
-    num_classes = complete_model_params.num_classes
+    num_classes = len(data_params.actions)
     class_correct = torch.zeros(num_classes).to(device)
     class_total = torch.zeros(num_classes).to(device)
     
@@ -108,14 +110,15 @@ def main():
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
-            _, logits_skeleton, _, _ = skeleton_model(kps, flow)
-            _, logits_flow, _, _ = I3D_model(kps, flow)
+            total_logits = 0
+            for model in models:
+                model.eval()
+                _, logits = model(kps, flow)
+                total_logits += logits
+                
             current_batch_size = label.size(0)
             total_samples += current_batch_size
-            
-            logits = logits_skeleton + logits_flow
-            
-            _, predict = torch.max(logits.data, 1)
+            _, predict = torch.max(total_logits.data, 1)
             
             test_correct += (predict == label).sum().item()
             

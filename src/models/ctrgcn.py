@@ -234,8 +234,6 @@ class TCN_GCN_unit(nn.Module):
 
 
 class CTR_GCN(nn.Module):
-    # def __init__(self, num_class=60, num_point=25, num_person=2, graph=None, graph_args=dict(), in_channels=3,
-    #              drop_out=0, adaptive=True):
     def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, adaptive=True, drop_out=0):
         super(CTR_GCN, self).__init__()
 
@@ -244,7 +242,9 @@ class CTR_GCN(nn.Module):
 
         self.num_class = model_params.num_classes
         self.num_point = data_params.num_nodes
-        self.in_channels = model_params.in_channels
+        
+        self.is_frame_diff_stream = model_params.is_frame_diff_stream
+        self.in_channels = model_params.in_channels if (not self.is_frame_diff_stream) else 2
         self.base_channels = model_params.base_channels
         self.data_bn = nn.BatchNorm1d(num_person * self.in_channels * self.num_point)
 
@@ -268,31 +268,6 @@ class CTR_GCN(nn.Module):
         self.fc = nn.Linear(self.base_channels*4, self.num_class)
         nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / self.num_class))
         bn_init(self.data_bn, 1)
-
-        self.use_frame_diff = model_params.use_frame_diff
-        if self.use_frame_diff:
-            in_channels_diff = 2
-            self.data_bn_diff = nn.BatchNorm1d(num_person * in_channels_diff * self.num_point)
-
-            block_list_diff = [
-                [in_channels_diff, self.base_channels, 1, False],
-                [self.base_channels, self.base_channels, 1, True],
-                [self.base_channels, self.base_channels, 1, True],
-                [self.base_channels, self.base_channels, 1, True],
-                [self.base_channels, self.base_channels*2, 2, True],
-                [self.base_channels*2, self.base_channels*2, 1, True],
-                [self.base_channels*2, self.base_channels*2, 1, True],
-                [self.base_channels*2, self.base_channels*4, 2, True],
-                [self.base_channels*4, self.base_channels*4, 1, True],
-                [self.base_channels*4, self.base_channels*4, 1, True],
-            ]
-            blockargs = [block_list_diff[int(i - 1)] for i in model_params.gcn_include_blocks]
-            self.blocks_diff = nn.ModuleList([
-                TCN_GCN_unit(ic, oc, A, stride=s, residual=r, adaptive=adaptive) for ic, oc, s, r in blockargs
-            ])
-            self.fc_diff = nn.Linear(self.base_channels*4, self.num_class)
-            nn.init.normal_(self.fc_diff.weight, 0, math.sqrt(2. / self.num_class))
-            bn_init(self.data_bn_diff, 1)
         
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
@@ -301,6 +276,9 @@ class CTR_GCN(nn.Module):
             
     def forward(self, x, flow=None):
         keypoints = x.detach().clone()
+        
+        if self.is_frame_diff_stream:
+            x = kp_diff_stats(keypoints)
         
         if len(x.shape) == 3:
             N, T, VC = x.shape
@@ -322,24 +300,4 @@ class CTR_GCN(nn.Module):
         x = self.drop_out(x)
         logits = self.fc(x)
         
-        if self.use_frame_diff:
-            y = kp_diff_stats(keypoints)
-            y = y.unsqueeze(-1)
-            N, C, T, V, M = y.size()
-
-            y = y.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
-            y = self.data_bn_diff(y)
-            y = y.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N * M, C, T, V)
-            for block in self.blocks_diff:
-                y = block(y)
-            c_new = y.size(1)
-            y = y.view(N, M, c_new, -1)
-            y = y.mean(3).mean(1)
-            feats_y = y
-            y = self.drop_out(y)
-            logits_y = self.fc_diff(y)
-            
-            feats = torch.stack([feats, feats_y], dim=0).mean(dim=0)
-            logits = torch.stack([logits, logits_y], dim=0).mean(dim=0)
-                    
         return feats, logits

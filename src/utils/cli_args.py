@@ -158,11 +158,6 @@ class ModelArguments:
         default=3,
         metadata={"help": "The size of each coordination"}
     )
-    # for ablation study
-    add_flow_stream: bool = field(
-        default=True,
-        metadata={"help":"Add the stream which inputs are flow instead of coords"}
-    )
     flow_statistic_mode: Literal["mean+std", "mean"] = field(
         default="mean+std",
         metadata={"help":"What kinds of statistic for sending the flow information."}
@@ -240,13 +235,17 @@ class ModelArguments:
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
     )
     # I3D related parameters
-    add_I3D_branch: bool = field(
-        default=True,
-        metadata={"help":"Whether add parallel I3D branch in the model for the prediction"}
-    )
-    only_I3D_branch: bool = field(
+    is_I3D_stream: bool = field(
         default=False,
-        metadata={"help":"Whether only use I3D branch(exclude GCN branch) in the model for the prediction"}
+        metadata={"help":"I3D stream for training and prediction"}
+    ) 
+    is_local_flow_stream: bool = field(
+        default=False,
+        metadata={"help":"flow stream for training and prediction"}
+    )
+    is_frame_diff_stream: bool = field(
+        default=False,
+        metadata={"help": "This is for ablation study, for showing using information of optical flow is better"}
     )
     I3D_weights_dir_name: str = field(
         default="I3D",
@@ -263,10 +262,6 @@ class ModelArguments:
     I3D_project_dim: int = field(
         default=256,
         metadata={"help":"Project to have the similar size with ST-GCN"}
-    )
-    use_frame_diff: bool = field(
-        default=False,
-        metadata={"help": "This is for ablation study, for showing using information of optical flow is better"}
     )
     
     
