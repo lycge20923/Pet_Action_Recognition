@@ -58,8 +58,8 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
     
     # --- set output folder ---
-    timestampe = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(output_params.output_dir, f"predict_{timestampe}")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.join(output_params.output_dir, f"predict_{timestamp}")
     os.makedirs(output_dir, exist_ok=True)
     
     # --- input file name ---
