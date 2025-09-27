@@ -261,7 +261,7 @@ class ModelArguments:
         metadata={"help":"Raw feature dimension of I3D"}
     )
     I3D_project_dim: int = field(
-        default=128,
+        default=256,
         metadata={"help":"Project to have the similar size with ST-GCN"}
     )
     use_frame_diff: bool = field(

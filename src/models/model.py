@@ -24,8 +24,13 @@ class ActionRecognitionModel(nn.Module):
         super(ActionRecognitionModel, self).__init__()
         self.only_I3D_branch = model_params.only_I3D_branch
         self.add_I3D_branch = model_params.add_I3D_branch
+        self.final_feature_dim = 0
         
-        # initiate model
+        # augmentation
+        self.aug_module = Augmentation(augment_params=aug_params)
+        
+        # initiate skeleton model
+        self.skel_model = None
         if not self.only_I3D_branch: # at least we use skeleton information 
             if model_params.gcn_model_name == "tdgcn":
                 self.skel_model = TD_GCN(model_params=model_params, data_params=data_params)
@@ -42,64 +47,80 @@ class ActionRecognitionModel(nn.Module):
             elif model_params.gcn_model_name == "ctrgcn":
                 self.skel_model = CTR_GCN(model_params=model_params, data_params=data_params)
                 self._skel_feat_dim = self.skel_model.fc.in_features
-                
-        else: # skip skeleton information
-            self.skel_model = None
-            self._skel_feat_dim = 0
-        # feat
+            self.final_feature_dim = self._skel_feat_dim
+            
+        # initiate I3D
         self.I3D = None
-        self._flow_feat_dim = 0
-        self._projected_flow_feat_dim = 0
-        
         if self.add_I3D_branch or self.only_I3D_branch:
-            self.I3D = InceptionI3d(in_channels=2)
+            self.I3D = InceptionI3d(in_channels=2, num_classes=model_params.num_classes)
             
             # load weight 
             i3d_weights_path = os.path.join(model_params.pretrained_weights_root_dir_name,
                                                 model_params.I3D_weights_dir_name,
                                                 model_params.I3D_weights_file_name)
-            self.I3D.load_state_dict(torch.load(i3d_weights_path))
-            self._flow_feat_dim = model_params.I3D_raw_feat_dim
+            i3d_state = torch.load(i3d_weights_path)
+            filtered = {}
+            for k, v in i3d_state.items():
+                if k.startswith("logits.") or "logits." in k:
+                    print(k)
+                    continue
+                filtered[k] = v
+            info = self.I3D.load_state_dict(filtered, strict=False)
+            print("Loading I3D pretrained weights...")
+            print("Missing keys:", info.missing_keys)
+            print("Unexpected keys:", info.unexpected_keys)
+            
             self._projected_flow_feat_dim = model_params.I3D_project_dim
-            self.flow_feature_projector = nn.Linear(self._flow_feat_dim, self._projected_flow_feat_dim)
+            self.flow_feature_projector = nn.Linear(model_params.I3D_raw_feat_dim, self._projected_flow_feat_dim)
+            self.final_feature_dim = self._projected_flow_feat_dim
         
-        # concate feature's size, for final classifier
-        self.total_feature_dimension = self._skel_feat_dim
-        if (self.add_I3D_branch or self.only_I3D_branch) and self.I3D is not None:
-            self.total_feature_dimension += self._projected_flow_feat_dim
-        self.final_classifier = nn.Linear(self.total_feature_dimension, model_params.num_classes)
+        # Both
+        if (self.add_I3D_branch) and (not self.only_I3D_branch):
+            if self._projected_flow_feat_dim == self._skel_feat_dim:
+                self.final_feature_dim = self._projected_flow_feat_dim
+            else:
+                raise ValueError("The dim of skeleton model and I3D should be same")
+            self.norm_skel = nn.LayerNorm(self.final_feature_dim)
+            self.norm_i3d  = nn.LayerNorm(self.final_feature_dim)
+            self.gate_logits = nn.Parameter(torch.zeros(self.final_feature_dim))
         
-        self.aug_module = Augmentation(augment_params=aug_params)
+        # final classifier
+        self.final_classifier = nn.Linear(self.final_feature_dim, model_params.num_classes)
     
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
         
+        # conduct augmentation
         skeleton, flow = self.aug_module(skeleton, flow)
+        
         # 1. only optical flow
-        if self.only_I3D_branch:
-            flow_map = self.I3D.extract_features(flow)
-            flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
+        if self.only_I3D_branch or self.add_I3D_branch:
+            flow_feat, flow_logits = self.I3D(flow)
             projected_flow_feat = self.flow_feature_projector(flow_feat)
-            combined_feat = projected_flow_feat
-            main_task_logits = self.final_classifier(combined_feat)
-            return combined_feat, main_task_logits
+            if self.only_I3D_branch:
+                main_task_logits = self.final_classifier(projected_flow_feat)
+                return projected_flow_feat, main_task_logits, None, None
         
         # 2. at least use skeleton information
-        skel_feat, _ = self.skel_model(skeleton, flow)
+        skel_feat, skel_logits = self.skel_model(skeleton, flow)
+        both_skel_logits, both_flow_logits = None, None # aux
         combined_feat = skel_feat
-        if self.add_I3D_branch and self.I3D is not None and flow is not None:
-            flow_map = self.I3D.extract_features(flow)
-            flow_feat = flow_map.mean(dim=2).view(flow_map.size(0), -1)
-            projected_flow_feat = self.flow_feature_projector(flow_feat)
-            combined_feat = torch.cat([skel_feat, projected_flow_feat], dim=1)
+        if self.add_I3D_branch:
+            s = self.norm_skel(skel_feat)
+            v = self.norm_i3d(projected_flow_feat)
+            alpha = torch.sigmoid(self.gate_logits).view(1, -1).expand_as(s)
+            combined_feat = alpha * s + (1.0 - alpha) * v 
+            
+            # for aux loss
+            both_skel_logits, both_flow_logits = skel_logits, flow_logits
 
         main_task_logits = self.final_classifier(combined_feat)
-        return combined_feat, main_task_logits
+        return combined_feat, main_task_logits, both_skel_logits, both_flow_logits
 
 class ContrastiveActionWrapper(nn.Module):
     def __init__(self, backbone: ActionRecognitionModel, emb_dim:int):
         super().__init__()
         self.backbone = backbone
-        backbone_output_feat_dim = self.backbone.total_feature_dimension
+        backbone_output_feat_dim = self.backbone.final_feature_dim
         self.proj_head = nn.Linear(backbone_output_feat_dim, emb_dim)
     
     '''
@@ -107,9 +128,9 @@ class ContrastiveActionWrapper(nn.Module):
         feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow, labels=labels)
     '''
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
-        feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow)
+        feat_from_backbone, main_logits, both_skel_logits, both_flow_logits = self.backbone(skeleton, flow=flow)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
-        return emb, main_logits
+        return emb, main_logits, both_skel_logits, both_flow_logits
 
 if __name__ == "__main__":
     import numpy as np 

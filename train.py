@@ -13,6 +13,7 @@ import torch
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from torch.utils.data._utils.collate import default_collate
+import torch.nn.functional as F
 
 from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
@@ -261,6 +262,7 @@ def build_model_and_optimizer(model_params:ModelArguments,
                 info = model.load_state_dict(state_dict, strict=False)
             else:
                 info = model.backbone.load_state_dict(state_dict, strict=False)
+            print("Loading whole pretrained weights...")
             print("Missing keys:", info.missing_keys)
             print("Unexpected keys:", info.unexpected_keys)
         except:
@@ -309,13 +311,21 @@ def train_one_epoch(model,
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
             y = y.to(device)
-            emb1, logit1 = model(kp1, flow1)
-            emb2, logit2 = model(kp2 ,flow2)
+            emb1, logit1, skel_logits_1, flow_logits_1 = model(kp1, flow1)
+            emb2, logit2, skel_logits_2, flow_logits_2 = model(kp2 ,flow2)
             
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
             loss_ce_part2 = cross_entropy_loss(logit2, lab2)
             batch_loss_ce = loss_ce_part1 + loss_ce_part2 
+            
+            # aux loss
+            if skel_logits_1 is not None and flow_logits_1 is not None:
+                aux_loss = cross_entropy_loss(skel_logits_1, lab1) + \
+                            cross_entropy_loss(flow_logits_1, lab1) + \
+                            cross_entropy_loss(skel_logits_2, lab2) + \
+                            cross_entropy_loss(flow_logits_2, lab2)
+                batch_loss_ce += 0.1 * aux_loss
             
             batch_loss_cl = contrastive_loss(emb1, emb2, y) * train_params.contrastive_loss_coefficient
             wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
@@ -348,9 +358,15 @@ def train_one_epoch(model,
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
-            _, output = model(kps, flow)
+            _, output, skel_logits, flow_logits = model(kps, flow)
 
             batch_loss_ce = cross_entropy_loss(output, label)
+            
+            # aux loss
+            if skel_logits is not None and flow_logits is not None:
+                batch_loss_ce += cross_entropy_loss(skel_logits, label) + \
+                            cross_entropy_loss(flow_logits, label)
+            
             batch_loss_total = batch_loss_ce
             
             batch_loss_total.backward() 
@@ -396,9 +412,9 @@ def val_one_epoch(model,
             label = label.to(device)
             
             if train_params.add_contrastive_loss:
-                _, output = model.backbone(kps, flow)
+                _, output, _, _ = model.backbone(kps, flow)
             else:
-                _, output = model(kps, flow)
+                _, output, _, _ = model(kps, flow)
             loss = cross_entropy_loss(output, label)
             current_batch_size = label.size(0)
             total_samples += current_batch_size
