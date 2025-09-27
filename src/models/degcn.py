@@ -435,11 +435,9 @@ class DE_GCN(nn.Module):
         
         # trial
         if self.is_local_flow_stream:
-            print('use local_flow stream')
             x = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
         
         elif self.is_frame_diff_stream:
-            print('use diff stream')
             x = kp_diff_stats(keypoints)
         
         # stream of coords
