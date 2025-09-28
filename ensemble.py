@@ -76,7 +76,7 @@ def main():
         raise ValueError('The fold number of all model should be the same')
     
     # load dataset
-    load_kps = (args.I3D_checkpoint_dir is None)
+    load_kps = args.joints_stream_checkpoint_dir or args.local_flow_stream_checkpoint_dir or args.diff_stream_checkpoint_dir
     load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
