@@ -79,8 +79,8 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
    
-    load_kps = not (model_params.is_I3D_stream)
-    load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream
+    load_kps = (not (model_params.is_I3D_stream)) or model_params.is_attgcn_stream
+    load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream or model_params.is_attgcn_stream
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
     train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
     
@@ -239,7 +239,6 @@ def train_one_epoch(model,
             wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
             
             batch_loss_total = batch_loss_ce + batch_loss_cl 
-            
             batch_loss_total.backward()
             
             # for name, param in model.named_parameters():

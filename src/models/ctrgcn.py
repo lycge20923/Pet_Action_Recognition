@@ -234,18 +234,20 @@ class TCN_GCN_unit(nn.Module):
 
 
 class CTR_GCN(nn.Module):
-    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, adaptive=True, drop_out=0):
+    def __init__(self, num_nodes:int, neighbor_base:list, num_classes:list,
+                is_frame_diff_stream:bool, gcn_include_blocks:list, in_channels:int=3, base_channels:int=64, 
+                num_person=1, adaptive=True, drop_out=0):
         super(CTR_GCN, self).__init__()
 
-        self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
+        self.graph = Graph(num_nodes=num_nodes, neighbor_base=neighbor_base)
         A = self.graph.A
 
-        self.num_class = model_params.num_classes
-        self.num_point = data_params.num_nodes
+        self.num_class = num_classes
+        self.num_point = num_nodes
         
-        self.is_frame_diff_stream = model_params.is_frame_diff_stream
-        self.in_channels = model_params.in_channels if (not self.is_frame_diff_stream) else 2
-        self.base_channels = model_params.base_channels
+        self.is_frame_diff_stream = is_frame_diff_stream
+        self.in_channels = in_channels if (not self.is_frame_diff_stream) else 2
+        self.base_channels = base_channels
         self.data_bn = nn.BatchNorm1d(num_person * self.in_channels * self.num_point)
 
         block_list = [
@@ -260,7 +262,7 @@ class CTR_GCN(nn.Module):
             [self.base_channels*4, self.base_channels*4, 1, True],
             [self.base_channels*4, self.base_channels*4, 1, True],
         ]
-        blockargs = [block_list[int(i - 1)] for i in model_params.gcn_include_blocks]
+        blockargs = [block_list[int(i - 1)] for i in gcn_include_blocks]
         self.blocks = nn.ModuleList([
             TCN_GCN_unit(ic, oc, A, stride=s, residual=r, adaptive=adaptive) for ic, oc, s, r in blockargs
         ])

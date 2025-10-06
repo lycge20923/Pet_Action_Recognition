@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from .gcn.tools import *
 from .gcn.graph import Graph
 from ..utils.cli_args import ModelArguments, DataArguments
-from ..utils.common import kp_diff_stats
+from ..utils.common import kp_diff_stats, compute_bones
 
 LEAKY_ALPHA = 0.1
 def init_param(modules):
@@ -255,7 +255,6 @@ class Basic_Block(nn.Module):
         x = self.tcn(x)
         x = x + self.residual2(res)            
         x = self.relu(x)
-        
         return x
 
 class DeGCN(nn.Module):
@@ -280,165 +279,94 @@ class DeGCN(nn.Module):
 
 class DE_GCN(nn.Module):
     def __init__(
-        self, model_params:ModelArguments, data_params:DataArguments, num_person=1, k=8, eta=4, drop_out=0,
+        self, num_nodes:int, neighbor_base:list, num_classes:list, num_samples:int, 
+        is_local_flow_stream:bool, is_frame_diff_stream:bool, is_bone_stream:bool,
+        gcn_include_blocks:list, flow_block_size:int=5, degcn_num_streams:int=2, in_channels:int=3, base_channels:int=64, 
+        num_person=1, k=8, eta=4, drop_out=0,
     ):
         super(DE_GCN, self).__init__()
-        self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
+        self.num_nodes = num_nodes
+        self.graph = Graph(num_nodes=num_nodes, neighbor_base=neighbor_base)
         self.A = self.graph.A  # (3, V, V)
         self.k = k
         self.eta = eta
         self.num_person = num_person
-        self.model_params = model_params
-        self.data_params = data_params
+        self.in_channels = in_channels
+        self.base_channels = base_channels
+        self.num_samples = num_samples
+        self.gcn_include_blocks = gcn_include_blocks
+        self.degcn_num_streams = degcn_num_streams
+        self.num_classes = num_classes
         
         # determine the stream type
-        self.is_local_flow_stream = model_params.is_local_flow_stream
-        self.is_frame_diff_stream = model_params.is_frame_diff_stream
+        self.is_local_flow_stream = is_local_flow_stream
+        self.is_frame_diff_stream = is_frame_diff_stream
+        self.is_bone_stream = is_bone_stream
         if self.is_local_flow_stream:
             print("Use local flow stream")
-            self.flow_block_size = model_params.flow_block_size
-            in_channels = 2 * model_params.flow_block_size * model_params.flow_block_size
+            self.flow_block_size = flow_block_size
+            self.in_channels = 2 * flow_block_size * flow_block_size
         elif self.is_frame_diff_stream:
             print("Use frame diff stream")
-            in_channels = 2
+            self.in_channels = 2
+        elif self.is_bone_stream:
+            print("Use bone stream")
+            self.in_channels = 2
         else:
             print("Use original keypoints stream")
-            in_channels = model_params.in_channels
-        
-        self.data_bn, self.streams, self.fc = self._init_streams(in_channels)
+            
+        self.data_bn, self.streams, self.fc = self._init_streams()
         
         if drop_out:
             self.drop_out = nn.Dropout(drop_out)
         else:
             self.drop_out = lambda x: x  
 
-    def _init_streams(self, in_channels):
-        data_bn = nn.BatchNorm1d(self.num_person * in_channels * self.data_params.num_nodes)
+    def _init_streams(self):
+        data_bn = nn.BatchNorm1d(self.num_person * self.in_channels * self.num_nodes)
         bn_init(data_bn, 1)
         
         block_list = [
-            [in_channels, self.model_params.base_channels, 1, False, self.data_params.num_samples, in_channels],
-            [self.model_params.base_channels, self.model_params.base_channels, 1, True, self.data_params.num_samples, in_channels],
-            [self.model_params.base_channels, self.model_params.base_channels, 1, True, self.data_params.num_samples, in_channels],
-            [self.model_params.base_channels, self.model_params.base_channels, 1, True, self.data_params.num_samples, in_channels],
-            [self.model_params.base_channels, self.model_params.base_channels * 2, 2, True, self.data_params.num_samples, in_channels],
-            [self.model_params.base_channels * 2, self.model_params.base_channels * 2, 1, True, self.data_params.num_samples // 2, in_channels],
-            [self.model_params.base_channels * 2, self.model_params.base_channels * 2, 1, True, self.data_params.num_samples // 2, in_channels],
-            [self.model_params.base_channels * 2, self.model_params.base_channels * 4, 2, True, self.data_params.num_samples // 2, in_channels],
-            [self.model_params.base_channels * 4, self.model_params.base_channels * 4, 1, True, self.data_params.num_samples // 4, in_channels],
-            [self.model_params.base_channels * 4, self.model_params.base_channels * 4, 1, True, self.data_params.num_samples // 4, in_channels]
+            [self.in_channels, self.base_channels, 1, False, self.num_samples, self.in_channels],
+            [self.base_channels, self.base_channels, 1, True, self.num_samples, self.in_channels],
+            [self.base_channels, self.base_channels, 1, True, self.num_samples, self.in_channels],
+            [self.base_channels, self.base_channels, 1, True, self.num_samples, self.in_channels],
+            [self.base_channels, self.base_channels * 2, 2, True, self.num_samples, self.in_channels],
+            [self.base_channels * 2, self.base_channels * 2, 1, True, self.num_samples // 2, self.in_channels],
+            [self.base_channels * 2, self.base_channels * 2, 1, True, self.num_samples // 2, self.in_channels],
+            [self.base_channels * 2, self.base_channels * 4, 2, True, self.num_samples // 2, self.in_channels],
+            [self.base_channels * 4, self.base_channels * 4, 1, True, self.num_samples // 4, self.in_channels],
+            [self.base_channels * 4, self.base_channels * 4, 1, True, self.num_samples // 4, self.in_channels]
         ]
-        blockargs = [block_list[int(i - 1)] for i in self.model_params.gcn_include_blocks]
+        blockargs = [block_list[int(i - 1)] for i in self.gcn_include_blocks]
         streams = nn.ModuleList([
-            DeGCN(blockargs, self.A, self.eta)for _ in range(self.model_params.degcn_num_streams)]
+            DeGCN(blockargs, self.A, self.eta)for _ in range(self.degcn_num_streams)]
         )
         
         fc = nn.ModuleList([
-            nn.Linear(self.model_params.base_channels*4, self.model_params.num_classes) for _ in range(self.model_params.degcn_num_streams)
+            nn.Linear(self.base_channels*4, self.num_classes) for _ in range(self.degcn_num_streams)
         ])
         for fc_ in fc:
-            nn.init.normal_(fc_.weight, 0, math.sqrt(2. / self.model_params.num_classes))
+            nn.init.normal_(fc_.weight, 0, math.sqrt(2. / self.num_classes))
         
         return data_bn, streams, fc
     
-    def local_flow_stats(self, keypoints: torch.Tensor,
-                        optical_flows: torch.Tensor,
-                        flow_block_size: int = 3):
-        """
-        Args:
-            keypoints:      (B, 3, T, J) – normalized (x, y, conf), but x/y may be outside [0,1].
-                            If [x,y,conf] == [0,0,0], treat as missing and skip.
-            optical_flows:  (B, 2, T, H, W) – flow u/v.
-            flow_block_size:     int – patch side length.
-
-        Returns:
-            features: (B, T, J, 4) – (mean_u, mean_v, std_u, std_v).
-        """
-        
-        B, _, T, J = keypoints.shape
-        _, _, _, H, W = optical_flows.shape
-        
-        device = optical_flows.device
-        dtype  = optical_flows.dtype
-
-        ps   = flow_block_size
-        half = flow_block_size // 2  # 與你給的名稱一致
-        r    = half
-        P    = ps * ps
-
-        # 1) 取出 x,y,conf 並轉成像素座標（從 normalized → pixels）
-        #    若你的 x,y 原本已是像素座標，可把兩行縮放改成 x_pix = x, y_pix = y。
-        x   = keypoints[:, 0, ...].to(dtype=dtype, device=device)     # (B, T, J)
-        y   = keypoints[:, 1, ...].to(dtype=dtype, device=device)     # (B, T, J)
-        conf= keypoints[:, 2, ...].to(dtype=dtype, device=device)     # (B, T, J)
-
-        x_pix = x * (W - 1)
-        y_pix = y * (H - 1)
-
-        # 2) 取整數中心（模擬原本硬切）
-        cx = x_pix.round()                                         # (B, T, J)
-        cy = y_pix.round()                                         # (B, T, J)
-
-        # 3) 建 ps×ps 偏移網格（像素座標）
-        base_y, base_x = torch.meshgrid(
-            torch.arange(-r, r + 1, device=device, dtype=dtype),
-            torch.arange(-r, r + 1, device=device, dtype=dtype),
-            indexing="ij"
-        )                                                          # (ps, ps)
-        base = torch.stack([base_x, base_y], dim=-1)               # (ps, ps, 2)
-
-        # 4) 組成每個關節的像素座標網格 (B,T,J,ps,ps,2)
-        grid_pix = base.view(1, 1, 1, ps, ps, 2).expand(B, T, J, ps, ps, 2).clone()
-        grid_pix[..., 0] = grid_pix[..., 0] + cx.unsqueeze(-1).unsqueeze(-1)  # x
-        grid_pix[..., 1] = grid_pix[..., 1] + cy.unsqueeze(-1).unsqueeze(-1)  # y
-
-        # 5) 像素座標 → [-1,1]（給 grid_sample）
-        grid = grid_pix.clone()
-        grid[..., 0] = 2.0 * (grid_pix[..., 0] / (W - 1)) - 1.0
-        grid[..., 1] = 2.0 * (grid_pix[..., 1] / (H - 1)) - 1.0
-        grid = grid.view(B * T * J, ps, ps, 2)                     # (BTJ, ps, ps, 2)
-
-        # 6) 準備 flow，展平成 (BTJ, 2, H, W)
-        #    optical_flows: (B, 2, T, H, W) → (B, T, 2, H, W) → (B*T, 2, H, W)
-        flow_bt = optical_flows.permute(0, 2, 1, 3, 4).contiguous().view(B * T, 2, H, W)
-        flow_rep = flow_bt.unsqueeze(1).expand(B * T, J, 2, H, W).reshape(B * T * J, 2, H, W)
-
-        # 7) 取樣（nearest + border 貼近原邏輯；若要亞像素平滑可改 mode='bilinear'）
-        patches = F.grid_sample(
-            flow_rep, grid,
-            mode='nearest',
-            padding_mode='border',
-            align_corners=False
-        )  # (BTJ, 2, ps, ps)
-        
-        # 7) 整理成 (B, 2*ps*ps, T, J)
-        patches = patches.view(B, T, J, 2, ps, ps)          # (B,T,J,2,ps,ps)
-        patches = patches.permute(0, 3, 4, 5, 1, 2).contiguous()  # (B,2,ps,ps,T,J)
-        patches = patches.view(B, 2 * ps * ps, T, J)        # (B, C_flow, T, J)
-        
-        # 8) 遮罩無效點（conf=0 或 [0,0,0]）
-        with torch.no_grad():
-            x0 = (keypoints[:, 0] == 0)
-            y0 = (keypoints[:, 1] == 0)
-            c0 = (keypoints[:, 2] == 0)
-            zero_xyc = (x0 & y0 & c0)                       # (B,T,J)
-            valid = ((keypoints[:, 2] > 0) & (~zero_xyc)).float()  # (B,T,J)
-        patches = patches * valid.unsqueeze(1)              # broadcast 到 C_flow
-
-        return patches  # (B, 2*ps*ps, T, J)
 
     def forward(self, x, optical_flows=None):
         keypoints = x.detach().clone()
         
         # Multi-stream processing and pooling
-        feats, logits_list = [], []
+        feats, logits_list, total_feats = [], [], []
         
         # trial
         if self.is_local_flow_stream:
-            x = self.local_flow_stats(keypoints, optical_flows, self.flow_block_size)
+            x = local_flow_stats(keypoints, optical_flows, self.flow_block_size)
         
         elif self.is_frame_diff_stream:
             x = kp_diff_stats(keypoints)
+        
+        elif self.is_bone_stream:
+            x = compute_bones(keypoints)
         
         # stream of coords
         x = x.unsqueeze(-1)
@@ -455,7 +383,8 @@ class DE_GCN(nn.Module):
             logits = fc(x_d)                   # (N, num_class)
             feats.append(x_pooled)
             logits_list.append(logits)
-        
+            total_feats.append(x_s)
+        total_feats = torch.stack(total_feats, dim=0).mean(dim=0)
         # Average across streams
         feat = torch.stack(feats, dim=0).mean(dim=0)         # (N, C')
         logits = torch.stack(logits_list, dim=0).mean(dim=0) # (N, num_class)

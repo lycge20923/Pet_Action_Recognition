@@ -8,6 +8,8 @@ import os
 import torch
 from torch.utils.data._utils.collate import default_collate
 
+from .cli_args import DEFAULT_SKELETON_LIST
+
 def get_video_info(video_path:str) -> cv2.VideoCapture:
     '''
     Purpose: Read a video file and return its properties.
@@ -43,6 +45,70 @@ def saving_self_training_best_gcn_weights_path(data_params:DataArguments, model_
     os.makedirs(os.path.dirname(path), exist_ok=True)
     return path
 
+
+def make_tree_from_skeleton_list(skeleton_list = DEFAULT_SKELETON_LIST, num_joints: int | None = None) -> torch.Tensor:
+    """
+    只回傳 parents (V,), root=-1
+      - 每個 child 僅保留第一個出現的 parent
+      - 以 Union-Find 避免形成 cycle
+    """
+    if num_joints is None:
+        num_joints = max(max(p, c) for p, c in skeleton_list) + 1
+    V = num_joints
+
+    parents = torch.full((V,), -1, dtype=torch.long)
+
+    # Union-Find
+    uf = list(range(V))
+    def find(x: int) -> int:
+        while uf[x] != x:
+            uf[x] = uf[uf[x]]
+            x = uf[x]
+        return x
+    def union(a: int, b: int) -> bool:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            uf[rb] = ra
+            return True
+        return False
+
+    for p, c in skeleton_list:
+        if parents[c] != -1:
+            continue          # 保留第一個 parent
+        if find(p) == find(c):
+            continue          # 會造成環 -> 跳過
+        parents[c] = p
+        union(p, c)
+
+    return parents  # (V,)
+
+def compute_bones(
+    keypoints: torch.Tensor,   # (B, 3 or 2, T, V): (x, y, [conf])
+) -> torch.Tensor:
+    """
+    Returns:
+      bones: (B, 2, T, V)
+    """
+    B, C, T, V = keypoints.shape
+    parents = make_tree_from_skeleton_list(num_joints=V)
+    
+    xy   = keypoints[:, 0:2]                       # (B,2,T,V)
+    conf = keypoints[:, 2:3] if C >= 3 else None   # (B,1,T,V) or None
+
+    device = keypoints.device
+    parents = parents.to(device)
+    valid = (parents >= 0)                         # (V,)
+    parents_idx = torch.where(valid, parents, torch.zeros_like(parents))
+
+    xy_par = xy.index_select(dim=3, index=parents_idx)    # (B,2,T,V)
+    bones  = xy - xy_par                                   # (B,2,T,V)
+    bones  = torch.where((~valid).view(1,1,1,V), torch.zeros_like(bones), bones)
+
+    conf_par = conf.index_select(dim=3, index=parents_idx)  # (B,1,T,V)
+    valid_conf = (conf > 0) & (conf_par > 0) & valid.view(1,1,1,V)
+    bones = bones * valid_conf.to(bones.dtype)
+
+    return bones
 
 def kp_diff_stats(keypoints: torch.Tensor):
     """

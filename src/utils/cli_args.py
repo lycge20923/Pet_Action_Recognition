@@ -18,6 +18,18 @@ class DataArguments:
         default_factory=lambda: list(DEFAULT_ACTIONS_LIST),
         metadata={"help": "List of action categories to be recognized."}
     )
+    num_classes: int = field(
+        default=len(DEFAULT_ACTIONS_LIST),
+        metadata={"help":"Total label to predict"}
+    )
+    neighbor_base: List[str] = field(
+        default_factory=lambda: list(DEFAULT_SKELETON_LIST),
+        metadata={"help": "List of skeleton (node pairs) to be recognized."}
+    )
+    num_nodes: int = field(
+        default=17,
+        metadata={"help":"The defined number of keypoints that can be detected"}
+    )
     ##############################
     ### for data preprocessing ###
     ##############################
@@ -98,10 +110,6 @@ class DataArguments:
         default="annotation.json",
         metadata={"help":"Filename of the annotation file used to store data."}
     )
-    num_nodes: int = field(
-        default=17,
-        metadata={"help":"The defined number of keypoints that can be detected"}
-    )
     fold_num: int = field(
         default=0,
         metadata={"help": "Fold number for k-fold cross-validation in the training step."}
@@ -175,14 +183,6 @@ class ModelArguments:
         default=13,
         metadata={'help':"refer total t kernel size in temporal conv"}
     )
-    num_classes: int = field(
-        default=len(DEFAULT_ACTIONS_LIST),
-        metadata={"help":"Total label to predict"}
-    )
-    neighbor_base: List[str] = field(
-        default_factory=lambda: list(DEFAULT_SKELETON_LIST),
-        metadata={"help": "List of skeleton (node pairs) to be recognized."}
-    )
     multihead_emb_dim: int = field(
         default=128, 
         metadata={"help":"Multihead ST GCN embedding size(for contrastive learning)"}
@@ -246,6 +246,14 @@ class ModelArguments:
     is_frame_diff_stream: bool = field(
         default=False,
         metadata={"help": "This is for ablation study, for showing using information of optical flow is better"}
+    )
+    is_bone_stream: bool = field(
+        default=False, 
+        metadata={"help":"The bone stream"}
+    )
+    is_attgcn_stream: bool = field(
+        default=False,
+        metadata={"help":"TBD"}
     )
     I3D_weights_dir_name: str = field(
         default="I3D",

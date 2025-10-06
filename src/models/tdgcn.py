@@ -245,34 +245,36 @@ class TCN_GCN_unit(nn.Module):
 
 
 class TD_GCN(nn.Module):
-    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, drop_out=0, adaptive=True):
+    def __init__(self, num_nodes:int, neighbor_base:list, num_classes:list,
+                is_frame_diff_stream:bool, gcn_include_blocks:list, in_channels:int=3, base_channels:int=64,
+                num_person=1, drop_out=0, adaptive=True):
         super(TD_GCN, self).__init__()
 
-        self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
+        self.graph = Graph(num_nodes=num_nodes, neighbor_base=neighbor_base)
 
         A = self.graph.A # 3,25,25
 
-        self.num_classes = model_params.num_classes
-        self.num_nodes = data_params.num_nodes
-        self.is_frame_diff_stream = model_params.is_frame_diff_stream
-        self.in_channels = model_params.in_channels if not self.is_frame_diff_stream else 2
+        self.num_classes = num_classes
+        self.num_nodes = num_nodes
+        self.is_frame_diff_stream = is_frame_diff_stream
+        self.in_channels = in_channels if not self.is_frame_diff_stream else 2
         self.data_bn = nn.BatchNorm1d(num_person * self.in_channels * self.num_nodes)
         
         block_confs = {
-            1: dict(in_c=self.in_channels,      out_c=model_params.base_channels,      stride=1),
-            2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
-            6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-            7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-            8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
-            9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-            10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
+            1: dict(in_c=self.in_channels,      out_c=base_channels,      stride=1),
+            2: dict(in_c=base_channels,  out_c=base_channels,      stride=1),
+            3: dict(in_c=base_channels,  out_c=base_channels,      stride=1),
+            4: dict(in_c=base_channels,  out_c=base_channels,      stride=1),
+            5: dict(in_c=base_channels,  out_c=base_channels*2,    stride=2),
+            6: dict(in_c=base_channels*2,out_c=base_channels*2,    stride=1),
+            7: dict(in_c=base_channels*2,out_c=base_channels*2,    stride=1),
+            8: dict(in_c=base_channels*2,out_c=base_channels*4,    stride=2),
+            9: dict(in_c=base_channels*4,out_c=base_channels*4,    stride=1),
+            10:dict(in_c=base_channels*4,out_c=base_channels*4,    stride=1),
         }
         
         self.blocks = nn.ModuleList()
-        for idx in sorted(model_params.gcn_include_blocks):
+        for idx in sorted(gcn_include_blocks):
             conf = block_confs[idx]
             self.blocks.append(
                 TCN_GCN_unit(
@@ -283,7 +285,7 @@ class TD_GCN(nn.Module):
                 )
             )
 
-        self.fc = nn.Linear(model_params.base_channels*4, self.num_classes)
+        self.fc = nn.Linear(base_channels*4, self.num_classes)
         nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / self.num_classes))
         bn_init(self.data_bn, 1)
         

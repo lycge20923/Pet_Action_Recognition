@@ -1,7 +1,9 @@
+import math
 import numpy as np
+
 import torch.nn as nn
 import torch
-import math
+import torch.nn.functional as F
 
 def import_class(name):
     components = name.split('.')
@@ -138,3 +140,89 @@ def get_multiscale_spatial_graph(num_node, self_link, inward, outward):
 def get_uniform_graph(num_node, self_link, neighbor):
     A = normalize_digraph(edge2mat(neighbor + self_link, num_node))
     return A
+
+def local_flow_stats(keypoints: torch.Tensor,
+                        optical_flows: torch.Tensor,
+                        flow_block_size: int = 3):
+    """
+    Args:
+        keypoints:      (B, 3, T, J) – normalized (x, y, conf), but x/y may be outside [0,1].
+                        If [x,y,conf] == [0,0,0], treat as missing and skip.
+        optical_flows:  (B, 2, T, H, W) – flow u/v.
+        flow_block_size:     int – patch side length.
+
+    Returns:
+        features: (B, T, J, 4) – (mean_u, mean_v, std_u, std_v).
+    """
+    
+    B, _, T, J = keypoints.shape
+    _, _, _, H, W = optical_flows.shape
+    
+    device = optical_flows.device
+    dtype  = optical_flows.dtype
+
+    ps   = flow_block_size
+    half = flow_block_size // 2  # 與你給的名稱一致
+    r    = half
+    P    = ps * ps
+
+    # 1) 取出 x,y,conf 並轉成像素座標（從 normalized → pixels）
+    #    若你的 x,y 原本已是像素座標，可把兩行縮放改成 x_pix = x, y_pix = y。
+    x   = keypoints[:, 0, ...].to(dtype=dtype, device=device)     # (B, T, J)
+    y   = keypoints[:, 1, ...].to(dtype=dtype, device=device)     # (B, T, J)
+    conf= keypoints[:, 2, ...].to(dtype=dtype, device=device)     # (B, T, J)
+
+    x_pix = x * (W - 1)
+    y_pix = y * (H - 1)
+
+    # 2) 取整數中心（模擬原本硬切）
+    cx = x_pix.round()                                         # (B, T, J)
+    cy = y_pix.round()                                         # (B, T, J)
+
+    # 3) 建 ps×ps 偏移網格（像素座標）
+    base_y, base_x = torch.meshgrid(
+        torch.arange(-r, r + 1, device=device, dtype=dtype),
+        torch.arange(-r, r + 1, device=device, dtype=dtype),
+        indexing="ij"
+    )                                                          # (ps, ps)
+    base = torch.stack([base_x, base_y], dim=-1)               # (ps, ps, 2)
+
+    # 4) 組成每個關節的像素座標網格 (B,T,J,ps,ps,2)
+    grid_pix = base.view(1, 1, 1, ps, ps, 2).expand(B, T, J, ps, ps, 2).clone()
+    grid_pix[..., 0] = grid_pix[..., 0] + cx.unsqueeze(-1).unsqueeze(-1)  # x
+    grid_pix[..., 1] = grid_pix[..., 1] + cy.unsqueeze(-1).unsqueeze(-1)  # y
+
+    # 5) 像素座標 → [-1,1]（給 grid_sample）
+    grid = grid_pix.clone()
+    grid[..., 0] = 2.0 * (grid_pix[..., 0] / (W - 1)) - 1.0
+    grid[..., 1] = 2.0 * (grid_pix[..., 1] / (H - 1)) - 1.0
+    grid = grid.view(B * T * J, ps, ps, 2)                     # (BTJ, ps, ps, 2)
+
+    # 6) 準備 flow，展平成 (BTJ, 2, H, W)
+    #    optical_flows: (B, 2, T, H, W) → (B, T, 2, H, W) → (B*T, 2, H, W)
+    flow_bt = optical_flows.permute(0, 2, 1, 3, 4).contiguous().view(B * T, 2, H, W)
+    flow_rep = flow_bt.unsqueeze(1).expand(B * T, J, 2, H, W).reshape(B * T * J, 2, H, W)
+
+    # 7) 取樣（nearest + border 貼近原邏輯；若要亞像素平滑可改 mode='bilinear'）
+    patches = F.grid_sample(
+        flow_rep, grid,
+        mode='nearest',
+        padding_mode='border',
+        align_corners=False
+    )  # (BTJ, 2, ps, ps)
+    
+    # 7) 整理成 (B, 2*ps*ps, T, J)
+    patches = patches.view(B, T, J, 2, ps, ps)          # (B,T,J,2,ps,ps)
+    patches = patches.permute(0, 3, 4, 5, 1, 2).contiguous()  # (B,2,ps,ps,T,J)
+    patches = patches.view(B, 2 * ps * ps, T, J)        # (B, C_flow, T, J)
+    
+    # 8) 遮罩無效點（conf=0 或 [0,0,0]）
+    with torch.no_grad():
+        x0 = (keypoints[:, 0] == 0)
+        y0 = (keypoints[:, 1] == 0)
+        c0 = (keypoints[:, 2] == 0)
+        zero_xyc = (x0 & y0 & c0)                       # (B,T,J)
+        valid = ((keypoints[:, 2] > 0) & (~zero_xyc)).float()  # (B,T,J)
+    patches = patches * valid.unsqueeze(1)              # broadcast 到 C_flow
+
+    return patches  # (B, 2*ps*ps, T, J)

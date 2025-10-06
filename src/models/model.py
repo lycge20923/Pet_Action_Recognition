@@ -9,6 +9,7 @@ from .tdgcn import TD_GCN
 from .degcn import DE_GCN
 from .ctrgcn import CTR_GCN
 from .infogcn import Info_GCN
+from .attgcn import ATT_GCN
 from .I3D import InceptionI3d
 from ..utils.cli_args import ModelArguments, DataArguments, AugmentationArguments
 from ..utils.common import saving_self_training_best_gcn_weights_path
@@ -26,33 +27,13 @@ class ActionRecognitionModel(nn.Module):
             "Train one stream at one time"
         self.is_I3D_stream = model_params.is_I3D_stream
         self.final_feature_dim = 0
+        self.is_attgcn_stream = model_params.is_attgcn_stream
         
         # augmentation
         self.aug_module = Augmentation(augment_params=aug_params)
         
-        # initiate skeleton model
-        self.skel_model = None
-        if not self.is_I3D_stream: # at least we use skeleton information 
-            print("use skele model")
-            if model_params.gcn_model_name == "tdgcn":
-                self.skel_model = TD_GCN(model_params=model_params, data_params=data_params)
-                self._skel_feat_dim = self.skel_model.fc.in_features
-            elif model_params.gcn_model_name == "stgcn":
-                self.skel_model = ST_GCN(model_params=model_params, data_params=data_params, coords=coords)
-                self._skel_feat_dim = self.skel_model.fc.in_channels
-            elif model_params.gcn_model_name == "infogcn":
-                self.skel_model = Info_GCN(model_params=model_params, data_params=data_params)
-                self._skel_feat_dim = self.skel_model.decoder.in_features
-            elif model_params.gcn_model_name == "degcn":
-                self.skel_model = DE_GCN(model_params=model_params, data_params=data_params)
-                self._skel_feat_dim = self.skel_model.fc[0].in_features
-            elif model_params.gcn_model_name == "ctrgcn":
-                self.skel_model = CTR_GCN(model_params=model_params, data_params=data_params)
-                self._skel_feat_dim = self.skel_model.fc.in_features
-            self.final_feature_dim = self._skel_feat_dim
-            
-        # initiate I3D
-        else:
+        # initiate I3D model
+        if self.is_I3D_stream: 
             print("use i3d model")
             self.I3D = InceptionI3d(in_channels=2, num_classes=model_params.num_classes)
             
@@ -75,9 +56,39 @@ class ActionRecognitionModel(nn.Module):
             self._projected_flow_feat_dim = model_params.I3D_project_dim
             self.flow_feature_projector = nn.Linear(model_params.I3D_raw_feat_dim, self._projected_flow_feat_dim)
             self.final_feature_dim = self._projected_flow_feat_dim
-        
+        elif self.is_attgcn_stream:
+            print("Use attgcn(attentionGCN) model")
+            num_nodes, neighbor_base, num_classes = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes
+            self.attgcn_model = ATT_GCN(num_nodes, neighbor_base, num_classes) 
+            self.final_feature_dim = self.attgcn_model.head[0].in_features
+        else: # at least we use skeleton information 
+            num_nodes, neighbor_base, num_classes, num_samples = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes, data_params.num_samples
+            is_local_flow_stream, is_frame_diff_stream, is_bone_stream = model_params.is_local_flow_stream, model_params.is_frame_diff_stream, model_params.is_bone_stream
+            gcn_include_blocks, in_channels, base_channels = model_params.gcn_include_blocks, model_params.in_channels, model_params.base_channels
+            
+            print("use skele model")
+            if model_params.gcn_model_name == "tdgcn":
+                self.skel_model = TD_GCN(num_nodes, neighbor_base, num_classes, is_frame_diff_stream, gcn_include_blocks, in_channels = in_channels, base_channels = base_channels)
+                self._skel_feat_dim = self.skel_model.fc.in_features
+            elif model_params.gcn_model_name == "stgcn":
+                self.skel_model = ST_GCN(num_nodes, neighbor_base, num_classes, coords, is_frame_diff_stream, gcn_include_blocks, in_channels = in_channels, base_channels = base_channels)
+                self._skel_feat_dim = self.skel_model.fc.in_channels
+            elif model_params.gcn_model_name == "infogcn":
+                self.skel_model = Info_GCN(num_nodes, neighbor_base, num_classes, is_frame_diff_stream, gcn_include_blocks, in_channels = in_channels, base_channels = base_channels)
+                self._skel_feat_dim = self.skel_model.decoder.in_features
+            elif model_params.gcn_model_name == "degcn":
+                self.skel_model = DE_GCN(num_nodes, neighbor_base, num_classes, num_samples,
+                                        is_local_flow_stream, is_frame_diff_stream, is_bone_stream,
+                                        gcn_include_blocks, flow_block_size=model_params.flow_block_size, 
+                                        in_channels = in_channels, base_channels = base_channels)
+                self._skel_feat_dim = self.skel_model.fc[0].in_features
+            elif model_params.gcn_model_name == "ctrgcn":
+                self.skel_model = CTR_GCN(num_nodes, neighbor_base, num_classes, is_frame_diff_stream, gcn_include_blocks, in_channels = in_channels, base_channels = base_channels)
+                self._skel_feat_dim = self.skel_model.fc.in_features
+            self.final_feature_dim = self._skel_feat_dim
+
         # final classifier
-        self.final_classifier = nn.Linear(self.final_feature_dim, model_params.num_classes)
+        self.final_classifier = nn.Linear(self.final_feature_dim, data_params.num_classes)
     
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
         
@@ -88,12 +99,14 @@ class ActionRecognitionModel(nn.Module):
         if self.is_I3D_stream:
             I3D_feat, _ = self.I3D(flow)
             feat = self.flow_feature_projector(I3D_feat)
-        
+        # trial
+        elif self.is_attgcn_stream:
+            trial_feat, _ = self.attgcn_model(skeleton, flow)
+            feat = trial_feat
         # skeleton stream
         else:
             skel_feat, _ = self.skel_model(skeleton, flow)
             feat = skel_feat
-            
         main_task_logits = self.final_classifier(feat)
         return feat, main_task_logits
 

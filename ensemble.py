@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
     parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
     parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
+    parser.add_argument('--is_attgcn_stream', default=None)
     return parser.parse_args()
 
 def load_weights(dir_name:str):
@@ -38,11 +39,15 @@ def load_weights(dir_name:str):
     
     fold_num = load_from_wandb(DataArguments, adjusted_params).fold_num
     checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
-    checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pt"
+    checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pth"
     checkpoint_path = os.path.join(dir_name, checkpoint_name)
     model = ActionRecognitionModel(model_params, data_params, coords=None).to(device)
     ckpt = torch.load(checkpoint_path, map_location=train_params.device)
-    model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    info = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    logger.info(f"Loading model from '{dir_name}' weights...")
+    logger.info(f"Missing keys: {info.missing_keys}")
+    logger.info(f"Unexpected keys:{info.unexpected_keys}")
+    
     logger.info(f"Loading whole pretrained weights from {checkpoint_path}")
     return model, fold_num
 
@@ -63,7 +68,7 @@ def main():
     set_seed(train_params.seed)
     
     # load model
-    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir]
+    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.is_attgcn_stream]
     models, fold_nums = [], []
     for model_dir in model_dirs:
         if model_dir is not None:
@@ -76,8 +81,8 @@ def main():
         raise ValueError('The fold number of all model should be the same')
     
     # load dataset
-    load_kps = args.joints_stream_checkpoint_dir or args.local_flow_stream_checkpoint_dir or args.diff_stream_checkpoint_dir
-    load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir
+    load_kps = args.joints_stream_checkpoint_dir or args.local_flow_stream_checkpoint_dir or args.diff_stream_checkpoint_dir or args.is_attgcn_stream
+    load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir or args.is_attgcn_stream
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
         val_dataset,

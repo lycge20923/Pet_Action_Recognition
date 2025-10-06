@@ -176,18 +176,17 @@ class STGC_block(nn.Module):
 
 class ST_GCN(nn.Module):
     def __init__(
-        self,
-        model_params:ModelArguments,
-        data_params:DataArguments,
-        coords: np.ndarray,
+        self, num_nodes:int, neighbor_base:list, num_classes:list, coords: np.ndarray,
+        is_frame_diff_stream:bool, gcn_include_blocks:list, in_channels:int=3, base_channels:int=64, 
+        t_kernel_size:int=13, stgcn_dilation:int=1, stgcn_hop_size:int=1
     ):
         super().__init__()
         # Build graph with spatial config partitioning
         graph = Graph(
-            num_nodes=data_params.num_nodes,
-            neighbor_base=model_params.neighbor_base,
+            num_nodes=num_nodes,
+            neighbor_base=neighbor_base,
             coords=coords,
-            hop_size=model_params.stgcn_hop_size,
+            hop_size=stgcn_hop_size,
             normalization_strategy='symmetric'
         )
         A = torch.tensor(graph.A, dtype=torch.float32, requires_grad=False)
@@ -195,39 +194,39 @@ class ST_GCN(nn.Module):
         self.register_buffer('A', A)
         A_size = A.size()  # (3, V, V)
         # BN over input channels * V
-        self.is_frame_diff_stream = model_params.is_frame_diff_stream
-        self.in_channels = model_params.in_channels if not self.is_frame_diff_stream else 2
+        self.is_frame_diff_stream = is_frame_diff_stream
+        self.in_channels = in_channels if not self.is_frame_diff_stream else 2
         self.bn = nn.BatchNorm1d(self.in_channels * A_size[1])
         
         # STGC blocks
         block_confs = {
-            1: dict(in_c=self.in_channels,      out_c=model_params.base_channels,      stride=1),
-            2: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            3: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            4: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels,      stride=1),
-            5: dict(in_c=model_params.base_channels,  out_c=model_params.base_channels*2,    stride=2),
-            6: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-            7: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*2,    stride=1),
-            8: dict(in_c=model_params.base_channels*2,out_c=model_params.base_channels*4,    stride=2),
-            9: dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
-            10:dict(in_c=model_params.base_channels*4,out_c=model_params.base_channels*4,    stride=1),
+            1: dict(in_c=self.in_channels,      out_c=base_channels,      stride=1),
+            2: dict(in_c=base_channels,  out_c=base_channels,      stride=1),
+            3: dict(in_c=base_channels,  out_c=base_channels,      stride=1),
+            4: dict(in_c=base_channels,  out_c=base_channels,      stride=1),
+            5: dict(in_c=base_channels,  out_c=base_channels*2,    stride=2),
+            6: dict(in_c=base_channels*2,out_c=base_channels*2,    stride=1),
+            7: dict(in_c=base_channels*2,out_c=base_channels*2,    stride=1),
+            8: dict(in_c=base_channels*2,out_c=base_channels*4,    stride=2),
+            9: dict(in_c=base_channels*4,out_c=base_channels*4,    stride=1),
+            10:dict(in_c=base_channels*4,out_c=base_channels*4,    stride=1),
         }
         
         self.blocks = nn.ModuleList()
-        for idx in sorted(model_params.gcn_include_blocks):
+        for idx in sorted(gcn_include_blocks):
             conf = block_confs[idx]
             self.blocks.append(
                 STGC_block(
                     conf['in_c'], conf['out_c'],
                     stride=conf['stride'],
-                    t_kernel_size=model_params.t_kernel_size,
+                    t_kernel_size=t_kernel_size,
                     A_size=A_size,
-                    dilation=model_params.stgcn_dilation
+                    dilation=stgcn_dilation
                 )
             )
         
         # Prediction head
-        self.fc = nn.Conv2d(model_params.base_channels*4, model_params.num_classes, kernel_size=1)
+        self.fc = nn.Conv2d(base_channels*4, num_classes, kernel_size=1)
         
     def forward(self, x: torch.Tensor, flow: torch.Tensor=None) -> torch.Tensor:
         keypoints = x.detach().clone()

@@ -225,16 +225,18 @@ class EncodingBlock(nn.Module):
 
 
 class Info_GCN(nn.Module):
-    def __init__(self, model_params:ModelArguments, data_params:DataArguments, num_person=1, noise_ratio=0.1, k=1, gain=1, drop_out=0):
+    def __init__(self, num_nodes:int, neighbor_base:list, num_classes:list,
+                is_frame_diff_stream:bool, gcn_include_blocks:list, in_channels:int=3, base_channels:int=64, 
+                num_person=1, noise_ratio=0.1, k=1, gain=1, drop_out=0):
         super(Info_GCN, self).__init__()
         
-        self.graph = Graph(num_nodes=data_params.num_nodes, neighbor_base=model_params.neighbor_base)
+        self.graph = Graph(num_nodes=num_nodes, neighbor_base=neighbor_base)
         self.A = self.graph.A
         num_head = self.A.shape[0]
 
-        self.num_class = model_params.num_classes
-        self.num_point = data_params.num_nodes
-        base_channel = model_params.base_channels
+        self.num_class = num_classes
+        self.num_point = num_nodes
+        base_channel = base_channels
         
         A = np.stack([np.eye(self.num_point)] * num_head, axis=0)
         
@@ -244,8 +246,8 @@ class Info_GCN(nn.Module):
         self.A_vector = self.get_A(self.graph, k)
         self.gain = gain
         
-        self.is_frame_diff_stream = model_params.is_frame_diff_stream
-        self.in_channels = model_params.in_channels if not self.is_frame_diff_stream else 2
+        self.is_frame_diff_stream = is_frame_diff_stream
+        self.in_channels = in_channels if not self.is_frame_diff_stream else 2
         self.to_joint_embedding = nn.Linear(self.in_channels, base_channel)
         self.pos_embedding = nn.Parameter(torch.randn(1, self.num_point, base_channel))
         
@@ -261,7 +263,7 @@ class Info_GCN(nn.Module):
             [base_channel*4, base_channel*4, 1],
             [base_channel*4, base_channel*4, 1],
         ]
-        blockargs = [block_list[int(i - 1)] for i in model_params.gcn_include_blocks]
+        blockargs = [block_list[int(i - 1)] for i in gcn_include_blocks]
         self.blocks = nn.ModuleList([
             EncodingBlock(in_channels=ic, out_channels=oc, A=A, stride=s) for ic, oc, s in blockargs
         ])
