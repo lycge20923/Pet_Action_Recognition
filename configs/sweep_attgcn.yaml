@@ -12,4 +12,6 @@ parameters:
     values: [8]
   is_attgcn_stream:
     values: [True]
+  patient_epochs:
+    values: [100]
   # other parameters...
