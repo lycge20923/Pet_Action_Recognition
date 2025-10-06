@@ -35,7 +35,7 @@ class ActionRecognitionModel(nn.Module):
         # initiate I3D model
         if self.is_I3D_stream: 
             print("use i3d model")
-            self.I3D = InceptionI3d(in_channels=2, num_classes=model_params.num_classes)
+            self.I3D = InceptionI3d(in_channels=2, num_classes=data_params.num_classes)
             
             # load weight 
             i3d_weights_path = os.path.join(model_params.pretrained_weights_root_dir_name,
