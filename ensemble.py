@@ -24,7 +24,7 @@ def parse_args():
     parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
     parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
     parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
-    parser.add_argument('--is_attgcn_stream', default=None)
+    parser.add_argument('--attgcn_stream', default=None)
     return parser.parse_args()
 
 def load_weights(dir_name:str):
@@ -68,7 +68,7 @@ def main():
     set_seed(train_params.seed)
     
     # load model
-    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.is_attgcn_stream]
+    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.attgcn_stream]
     models, fold_nums = [], []
     for model_dir in model_dirs:
         if model_dir is not None:
@@ -81,8 +81,8 @@ def main():
         raise ValueError('The fold number of all model should be the same')
     
     # load dataset
-    load_kps = args.joints_stream_checkpoint_dir or args.local_flow_stream_checkpoint_dir or args.diff_stream_checkpoint_dir or args.is_attgcn_stream
-    load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir or args.is_attgcn_stream
+    load_kps = args.joints_stream_checkpoint_dir or args.local_flow_stream_checkpoint_dir or args.diff_stream_checkpoint_dir or args.attgcn_stream
+    load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir or args.attgcn_stream
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
         val_dataset,
