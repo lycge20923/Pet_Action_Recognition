@@ -425,10 +425,6 @@ class TrainingArguments:
         default="args_adjusted.yaml",
         metadata={"help":"The file name for saving adjusted args, those would be used in prediction"}
     )
-    save_best_gcn_weights: bool = field(
-        default=False,
-        metadata={"help": "Whether cover the best model weight of STGCN."}
-    )
     save_predict_details_name: str = field(
         default="details.json",
         metadata={"help": "The file name for saving predict details(could set None not to save)"}

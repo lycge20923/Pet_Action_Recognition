@@ -18,7 +18,7 @@ from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
 from src.dataset.dataset import KpOfDataset, SiameseKpOfDataset
 from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
-from src.utils.common import load_from_wandb, saving_self_training_best_gcn_weights_path, custom_collate, set_seed
+from src.utils.common import load_from_wandb, custom_collate, set_seed
 
 def setup_experiments():
     # set wandb
@@ -449,14 +449,6 @@ def main():
                 print("Info: Saving ActionRecognitionModel state_dict.")
             
             if not train_params.for_test:
-                # save 
-                # for best model saving
-                if train_params.save_best_gcn_weights:
-                    torch.save(
-                        save_model.skel_model.state_dict(),
-                        saving_self_training_best_gcn_weights_path(data_params,model_params)
-                    )
-                
                 # for one-run model saving
                 torch.save({
                     'epoch': epoch + 1,

@@ -180,3 +180,4 @@ output/*
 test/*
 wandb/*
 runs/*
+models/self_training/*

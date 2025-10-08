@@ -12,7 +12,6 @@ from .infogcn import Info_GCN
 from .attgcn import ATT_GCN
 from .I3D import InceptionI3d
 from ..utils.cli_args import ModelArguments, DataArguments, AugmentationArguments
-from ..utils.common import saving_self_training_best_gcn_weights_path
 
 from .augment import Augmentation
 
