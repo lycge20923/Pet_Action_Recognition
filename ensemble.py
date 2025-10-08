@@ -41,7 +41,11 @@ def load_weights(dir_name:str):
     checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
     checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pth"
     checkpoint_path = os.path.join(dir_name, checkpoint_name)
-    model = ActionRecognitionModel(model_params, data_params, coords=None).to(device)
+    coords = None
+    if model_params.gcn_model_name == "stgcn":
+        coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
+        coords = np.load(coord_path)
+    model = ActionRecognitionModel(model_params, data_params, coords=coords).to(device)
     ckpt = torch.load(checkpoint_path, map_location=train_params.device)
     info = model.load_state_dict(ckpt["model_state_dict"], strict=False)
     logger.info(f"Loading model from '{dir_name}' weights...")
