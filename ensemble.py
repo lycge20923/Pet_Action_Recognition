@@ -6,8 +6,8 @@ import torch
 import yaml
 from collections import defaultdict
 import json
-import time
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 from torch.utils.data import DataLoader
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
@@ -19,12 +19,24 @@ from src.dataset.dataset import KpOfDataset
 from src.models.model import ActionRecognitionModel
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Ensemble for Action Recognition')
+    parser = argparse.ArgumentParser(description='Ensemble for Action Recognition(include 5-fold validation)')
+    
+    # for 5-fold validation
+    parser.add_argument("--five_fold_val", action="store_true", help="If not 5-fold validation, it would be needed to input the directory path.\
+        o.w., You only have to check whether `models` have 5-fold satisfied weight files for validation, and only need to input the stream name")
+    parser.add_argument("--joints_stream", action="store_true", help="Use joints stream")
+    parser.add_argument("--local_flow_stream", action="store_true", help="Use local flow stream")
+    parser.add_argument("--diff_stream", action="store_true", help="Use diff stream")
+    parser.add_argument('--attgcn_stream', action="store_true", help="Use attgcn stream")
+    parser.add_argument("--I3D_stream", action="store_true", help="Use I3D stream")
+    parser.add_argument("--joints_gcn_name", default="degcn", choices=["ctrgcn", "infogcn", "stgcn", "tdgcn", "degcn"], help="(ablation study) choose different gcn name if needed")
+    
+    # for individual
     parser.add_argument('--joints_stream_checkpoint_dir', default=None, help="Skeleton model(joints) checkpoint dir")
     parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
     parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
+    parser.add_argument('--attgcn_stream_checkpoint_dir', default=None, help="Attgcn checkpoint dir")
     parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
-    parser.add_argument('--attgcn_stream', default=None)
     return parser.parse_args()
 
 def load_weights(dir_name:str):
@@ -55,24 +67,7 @@ def load_weights(dir_name:str):
     logger.info(f"Loading whole pretrained weights from {checkpoint_path}")
     return model, fold_num
 
-def main():
-    # args
-    args = parse_args()
-    
-    # load parameters
-    global logger, train_params, data_params, device
-    logger = setup_logger(file_path=__file__,level=logging.INFO)
-    train_params = TrainingArguments()
-    aug_params_eval = AugmentationArguments(augment=False)
-    output_params = ResultsArguments()
-    data_params = DataArguments()
-    device = train_params.device
-    
-    # set seed 
-    set_seed(train_params.seed)
-    
-    # load model
-    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.attgcn_stream]
+def set_models(model_dirs:list):
     models, fold_nums = [], []
     for model_dir in model_dirs:
         if model_dir is not None:
@@ -83,10 +78,12 @@ def main():
         fold_num = fold_nums[0]
     else:
         raise ValueError('The fold number of all model should be the same')
-    
-    # load dataset
-    load_kps = args.joints_stream_checkpoint_dir or args.local_flow_stream_checkpoint_dir or args.diff_stream_checkpoint_dir or args.attgcn_stream
-    load_flows = args.local_flow_stream_checkpoint_dir or args.I3D_checkpoint_dir or args.attgcn_stream
+    return models, fold_num
+
+def set_dataloaders(joints, local_flow, diff, attgcn, I3D, fold_num):
+    load_kps = joints or local_flow or diff or attgcn
+    load_flows = local_flow or attgcn or I3D
+    aug_params_eval = AugmentationArguments(augment=False)
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
         val_dataset,
@@ -96,16 +93,82 @@ def main():
         pin_memory=True if train_params.device == "cuda" else False,
         collate_fn=custom_collate
     )
+    return val_loader
+
+def main():
+    # args
+    args = parse_args()
     
-    # set output folder
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(output_params.output_dir, f"ensemble_{timestamp}_{fold_num}")
-    os.makedirs(output_dir, exist_ok=True)
+    # load parameters
+    global logger, train_params, data_params, device, actions, num_classes
+    logger = setup_logger(file_path=__file__,level=logging.INFO)
+    
+    train_params = TrainingArguments()
+    device = train_params.device
+    
+    output_params = ResultsArguments()
+    
+    data_params = DataArguments()
+    actions = data_params.actions
+    num_classes = len(actions)
+    
+    # set seed 
+    set_seed(train_params.seed)
+        
+    if args.five_fold_val:
+        model_params = ModelArguments()
+        model_dir, st_dir = model_params.pretrained_weights_root_dir_name, model_params.self_training_weights_dir_name
+        subroot_dir = os.path.join(model_dir, st_dir)
+        fold_ids = [i for i in range(data_params.num_folds)]
+        save_subdir = []
+        if args.joints_stream:
+            if args.joints_gcn_name == "degcn":
+                save_subdir.append("joints")
+            else:
+                save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}"))
+        if args.diff_stream:
+            if args.joints_gcn_name == "degcn":
+                save_subdir.append(os.path.join("supplement", "diff"))
+            else:
+                save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}"))
+        if args.local_flow_stream:
+            save_subdir.append("local_flow")
+        if args.attgcn_stream:
+            save_subdir.append("attgcn")
+        if args.I3D_stream:
+            save_subdir.append("I3D")
+        
+        all_models = []
+        for fold_id in fold_ids:
+            model_dirs = [os.path.join(subroot_dir, str(fold_id), sub_dir) for sub_dir in save_subdir]
+            models, fold_num = set_models(model_dirs)
+            all_models.append(models)
+            
+        # set output folder
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = os.path.join(output_params.output_dir, f"ensemble_{timestamp}_all")
+        os.makedirs(output_dir, exist_ok=True)
+        
+    else:
+        # set models
+        model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.attgcn_stream_checkpoint_dir]
+        models, fold_num = set_models(model_dirs)
+        
+        fold_ids = [fold_num]
+        
+        # load dataset
+        all_models = [models]
+        
+        # set output folder
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = os.path.join(output_params.output_dir, f"ensemble_{timestamp}_{fold_num}")
+        os.makedirs(output_dir, exist_ok=True)
+        
     
     # start eval
     test_correct = 0
     total_samples = 0
-    num_classes = len(data_params.actions)
+    
     class_correct = torch.zeros(num_classes).to(device)
     class_total = torch.zeros(num_classes).to(device)
     
@@ -113,48 +176,87 @@ def main():
     all_preds = []
     all_details = defaultdict(lambda: {"preds": [], "ground-trues": []})
     
-    with torch.no_grad():
-        for kps, flow, label, video_name in val_loader:
-            
-            kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
-            label = label.to(device)
-            
-            total_logits = 0
-            for model in models:
-                model.eval()
-                _, logits = model(kps, flow)
-                total_logits += logits
+    count_samples = 0
+    for models, fold_id in zip(all_models, fold_ids):
+        
+        # load data loader
+        if args.five_fold_val:
+            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.attgcn_stream, args.I3D_stream, fold_id)
+        else:
+            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.attgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id)
+        
+        count_samples += len(val_loader.dataset)
+        with torch.no_grad():
+            for kps, flow, label, video_name in val_loader:
                 
-            current_batch_size = label.size(0)
-            total_samples += current_batch_size
-            _, predict = torch.max(total_logits.data, 1)
-            
-            test_correct += (predict == label).sum().item()
-            
-            # add batch label & predict to list
-            all_trues.extend(label.cpu().numpy())
-            all_preds.extend(predict.cpu().numpy())
-            
-            # collect details
-            for i in range(current_batch_size):
-                vn = video_name[i]
-                gt = int(label[i].item())
-                pd = int(predict[i].item())
-                all_details[vn]["ground-trues"].append(gt)
-                all_details[vn]["preds"].append(pd)
-            
-            # calculate class-wise accuracy
-            corrects = (predict == label)
-            for i in range(current_batch_size):
-                true_label = label[i].item()       
-                class_total[true_label] += 1       
-                if corrects[i]:                    
-                    class_correct[true_label] += 1 
-
+                kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
+                label = label.to(device)
+                
+                total_logits = 0
+                for model in models:
+                    model.eval()
+                    _, logits = model(kps, flow)
+                    total_logits += logits
+                    
+                current_batch_size = label.size(0)
+                total_samples += current_batch_size
+                _, predict = torch.max(total_logits.data, 1)
+                
+                test_correct += (predict == label).sum().item()
+                
+                # add batch label & predict to list
+                all_trues.extend(label.cpu().numpy())
+                all_preds.extend(predict.cpu().numpy())
+                
+                # collect details
+                for i in range(current_batch_size):
+                    vn = video_name[i]
+                    gt = int(label[i].item())
+                    pd = int(predict[i].item())
+                    all_details[vn]["ground-trues"].append(gt)
+                    all_details[vn]["preds"].append(pd)
+                
+                # calculate class-wise accuracy
+                corrects = (predict == label)
+                for i in range(current_batch_size):
+                    true_label = label[i].item()       
+                    class_total[true_label] += 1       
+                    if corrects[i]:                    
+                        class_correct[true_label] += 1 
+        del val_loader
+        
     cm = confusion_matrix(all_trues, all_preds, labels=list(range(num_classes))) # confusion matrix
     cm = cm.astype(np.float32) / cm.sum(axis=1, keepdims=True)
     
-    epoch_acc = test_correct / len(val_loader.dataset)
+    fig, ax = plt.subplots(figsize=(8, 7))
+    im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
+
+    # draw cm
+    cbar = ax.figure.colorbar(im, ax=ax)
+    cbar.ax.set_ylabel('Average Value', rotation=-90, va="bottom")
+    ax.set_title('Average Confusion Matrix (5-fold)')
+    ax.set_xlabel('Predicted Label')
+    ax.set_ylabel('True Label')
+    tick_marks = np.arange(len(actions))
+    ax.set_xticks(tick_marks)
+    ax.set_yticks(tick_marks)
+    ax.set_xticklabels(actions, rotation=45, ha="right")
+    ax.set_yticklabels(actions)
+    fmt = ".2f" 
+    thresh = cm.max() / 2.0
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(
+                j, i, format(cm[i, j], fmt),
+                ha="center", va="center",
+                color="white" if cm[i, j] > thresh else "black"
+            )
+    fig.tight_layout()
+    save_fig_path = os.path.join(output_dir, "confusion_matrix_plot.png")
+    plt.savefig(save_fig_path, dpi=300, bbox_inches="tight")
+    logger.info(f"Confusion matrix image saved to: {save_fig_path}")
+    
+    epoch_acc = test_correct / count_samples
     
     # for precision, recall, f1
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
@@ -170,7 +272,6 @@ def main():
         zero_division=0
     )
     
-    actions=data_params.actions
     log_dict = {}
     for i in range(num_classes):
         action_name = actions[i]
@@ -179,7 +280,7 @@ def main():
         log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
         
     print(f"Overall Acc: {epoch_acc:.4f}, "
-          f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
+        f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
     print("Per-class:")
     for i in range(num_classes):
         action_name = actions[i]
@@ -196,8 +297,8 @@ def main():
     
     # pre-process and save predict details
     for video_name, details in all_details.items():
-        all_details[video_name]["ground-trues"] = ' '.join(set([data_params.actions[index] for index in all_details[video_name]["ground-trues"]]))
-        all_details[video_name]["preds"] = '|'.join([data_params.actions[index] for index in all_details[video_name]["preds"]])
+        all_details[video_name]["ground-trues"] = ' '.join(set([actions[index] for index in all_details[video_name]["ground-trues"]]))
+        all_details[video_name]["preds"] = '|'.join([actions[index] for index in all_details[video_name]["preds"]])
     
     if train_params.save_predict_details_name:
         details_path = os.path.join(output_dir, train_params.save_predict_details_name)

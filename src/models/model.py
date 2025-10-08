@@ -65,7 +65,6 @@ class ActionRecognitionModel(nn.Module):
             is_local_flow_stream, is_frame_diff_stream, is_bone_stream = model_params.is_local_flow_stream, model_params.is_frame_diff_stream, model_params.is_bone_stream
             gcn_include_blocks, in_channels, base_channels = model_params.gcn_include_blocks, model_params.in_channels, model_params.base_channels
             
-            print("use skele model")
             if model_params.gcn_model_name == "tdgcn":
                 self.skel_model = TD_GCN(num_nodes, neighbor_base, num_classes, is_frame_diff_stream, gcn_include_blocks, in_channels = in_channels, base_channels = base_channels)
                 self._skel_feat_dim = self.skel_model.fc.in_features
