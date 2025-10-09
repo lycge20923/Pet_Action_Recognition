@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import json
 import yaml
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 import seaborn as sns
 
 from src.utils.logging_utils import setup_logger
@@ -196,6 +197,7 @@ def predict():
     
     # ---prediction ---
     window_results = []
+    all_probs = []
     actions = data_params.actions
     with torch.no_grad():
         for fn in samples:
@@ -212,6 +214,7 @@ def predict():
             prob = F.softmax(total_logits, dim=1)[0]
             pred = int(prob.argmax().cpu())
             window_results.append(pred)
+            all_probs.append(prob.detach().cpu().numpy())
             logger.info(f"{os.path.basename(fn)} → class {pred} (p={prob[pred]:.3f})")
 
     # visualize prediction
@@ -299,6 +302,62 @@ def predict():
     with open(out_fp, 'w') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
     logger.info(f"Saved per-window predictions to {out_fp}")
+    
+    # plot 
+    probs_arr = np.stack(all_probs, axis=0)           # [n_windows, n_classes]
+    preds = np.array(window_results, dtype=int)       # [n_windows]
+    actions = data_params.actions
+    n, _ = probs_arr.shape
+
+    # get gt-truth 
+    gt_idx = None
+    if gt_label is not None:
+        gt_idx = actions.index(gt_label)
+
+    win = data_params.window_size
+    xs_center = (np.arange(n) * win + win / 2.0) / fps 
+    xs_start  = (np.arange(n) * win) / fps    
+    xs_end    = ((np.arange(n) + 1) * win) / fps 
+
+    # 折線：若有 GT → 畫該類別的機率；否則退回 Top-1 機率
+    if gt_idx is not None:
+        y = probs_arr[:, gt_idx]
+        y_label = f"P(GT={actions[gt_idx]})"
+    else:
+        y = probs_arr.max(axis=1)
+        y_label = "Top-1 probability"
+
+    fig, ax = plt.subplots(figsize=(10, 3.6))
+    ax.set_ylim(0.0, 1.05)
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel(y_label)
+    ax.set_title(f"{base} - {y_label} over time")
+
+    if n >= 2:
+        # 以相鄰兩點形成線段，依「左端點是否預測為GT」上色
+        pts = np.column_stack([xs_center, y])              # [n, 2]
+        segs = np.stack([pts[:-1], pts[1:]], axis=1)       # [n-1, 2, 2]
+
+        if (gt_idx is not None):
+            ok = (preds[:-1] == gt_idx)                    # [n-1]
+            colors = np.where(ok, 'green', 'red')          # 綠=正確、紅=錯誤
+        else:
+            colors = np.array(['tab:blue'] * (n - 1))      # 無GT就全藍
+
+        lc = LineCollection(segs, colors=colors, linewidths=2)
+        ax.add_collection(lc)
+
+        # 讓座標軸覆蓋到整段時間
+        ax.set_xlim(xs_center[0], xs_center[-1])
+    else:
+        # 只有一個點時，畫個點避免空白
+        ax.plot(xs_center, y, marker='o', color='green' if (gt_idx is not None and preds[0]==gt_idx) else 'red', linewidth=0)
+
+    plt.tight_layout()
+    curve_path = os.path.join(output_dir, f"{base}_gt_confidence_curve.png")
+    plt.savefig(curve_path, dpi=150)
+    plt.close(fig)
+    logger.info(f"Saved GT confidence curve to {curve_path}")
     
     
 if __name__ == "__main__":
