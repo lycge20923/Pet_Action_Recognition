@@ -31,31 +31,64 @@ from features.optical_flow import OpticalFlowModel
 def parse_args():
     parser = argparse.ArgumentParser(description='Prediction for Action Recognition')
     parser.add_argument('--input_path', required=True, help="The video path")
-    parser.add_argument('--checkpoint_dir', required=True, help="The directory storing the pretrained weight")
-    parser.add_argument('--checkpoint_name', default="best.pth", help="The .pth name")
+    
+    parser.add_argument('--joints_stream_checkpoint_dir', default=None, help="Skeleton model(joints) checkpoint dir")
+    parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
+    parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
+    parser.add_argument('--attgcn_stream_checkpoint_dir', default=None, help="Attgcn checkpoint dir")
+    parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
+    
     return parser.parse_args()
 
-def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
+def load_weights(dir_name:str):
+    train_params = TrainingArguments()
+    data_params = DataArguments()
+    save_adjusted_args_name = train_params.save_adjusted_args_name
+    adjusted_params_path = os.path.join(dir_name, save_adjusted_args_name)
+    with open(adjusted_params_path, 'r') as f:
+        adjusted_params = yaml.safe_load(f)
+    
+    model_params = load_from_wandb(ModelArguments, adjusted_params)
+    
+    checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
+    checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pth"
+    checkpoint_path = os.path.join(dir_name, checkpoint_name)
+    coords = None
+    if model_params.gcn_model_name == "stgcn":
+        coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
+        coords = np.load(coord_path)
+    model = ActionRecognitionModel(model_params, data_params, coords=coords).to(device)
+    ckpt = torch.load(checkpoint_path, map_location=device)
+    info = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    logger.info(f"Loading model from '{dir_name}' weights...")
+    logger.info(f"Missing keys: {info.missing_keys}")
+    logger.info(f"Unexpected keys:{info.unexpected_keys}")
+    
+    logger.info(f"Loading whole pretrained weights from {checkpoint_path}")
+    return model
+
+def set_models(model_dirs:list):
+    models = []
+    for model_dir in model_dirs:
+        if model_dir is not None:
+            model = load_weights(dir_name=model_dir)
+            models.append(model)
+    return models
+
+def predict():
+    args = parse_args()
+    
+    global device, logger
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    
+    input_path = args.input_path
     
     # --- set logger ---
     logger = setup_logger(file_path=__file__,level=logging.INFO)
     
-    save_adjusted_args_name = TrainingArguments().save_adjusted_args_name
-    adjusted_params_path = os.path.join(checkpoint_dir, save_adjusted_args_name)
-    
-    # load adjusted parameters if exists
-    if os.path.exists(adjusted_params_path):
-        with open(adjusted_params_path, 'r') as f:
-            adjusted_params = yaml.safe_load(f)
-        model_params = load_from_wandb(ModelArguments, adjusted_params)
-    else:
-        model_params = ModelArguments() # adjust if needed
-        logger.warning("There is no 'args_adjusted.yaml' in the checkpoint dircetory.") 
-        logger.warning("You have to adjust predict.py to manually pass in the correct parameters.")
     data_params = DataArguments()
     output_params = ResultsArguments()
-    
-    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_name)
     
     # --- set output folder ---
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -157,15 +190,11 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
         np.savez_compressed(fn, keypoints=kp_s, optical_flows=of_s)
         samples.append(fn)
     
+    # ---set main models---
+    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.attgcn_stream_checkpoint_dir]
+    models = set_models(model_dirs)
+    
     # ---prediction ---
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
-    coords = np.load(coord_path)
-    model = ActionRecognitionModel(model_params, data_params, coords=coords).to(device)
-    ckpt = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(ckpt["model_state_dict"])
-    model.eval()
-    logger.info(f"Loaded checkpoint {checkpoint_path}")
     window_results = []
     actions = data_params.actions
     with torch.no_grad():
@@ -174,8 +203,13 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
             kps = torch.from_numpy(data["keypoints"]).permute(2,0,1).unsqueeze(0).to(device)  # (1,3,T,V)
             fl  = torch.from_numpy(data["optical_flows"]).squeeze(axis=1).permute(1, 0, 2, 3).unsqueeze(0).to(device)  # (1,2,T,H,W)
             
-            feat, logits = model(kps, fl)
-            prob = F.softmax(logits, dim=1)[0]
+            total_logits = 0
+            for model in models:
+                model.eval()
+                _, logits = model(kps, fl)
+                total_logits += logits
+            
+            prob = F.softmax(total_logits, dim=1)[0]
             pred = int(prob.argmax().cpu())
             window_results.append(pred)
             logger.info(f"{os.path.basename(fn)} → class {pred} (p={prob[pred]:.3f})")
@@ -260,6 +294,7 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
         "video": base,
         "window_predictions": predictions
     }
+    print(f"The prediction is: {', '.join(predictions)}")
     out_fp = os.path.join(output_dir, f"{base}_predict.json")
     with open(out_fp, 'w') as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
@@ -267,5 +302,4 @@ def predict(input_path:str, checkpoint_dir:str, checkpoint_name:str):
     
     
 if __name__ == "__main__":
-    args = parse_args()
-    predict(input_path=args.input_path, checkpoint_dir=args.checkpoint_dir, checkpoint_name=args.checkpoint_name)
+    predict()
