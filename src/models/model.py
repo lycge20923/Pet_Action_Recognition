@@ -58,7 +58,9 @@ class ActionRecognitionModel(nn.Module):
         elif self.is_attgcn_stream:
             print("Use attgcn(attentionGCN) model")
             num_nodes, neighbor_base, num_classes = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes
-            self.attgcn_model = ATT_GCN(num_nodes, neighbor_base, num_classes) 
+            i3d_add_temp_encoder = model_params.attgcn_flow_embedding_add_temp_encoder
+            add_joint_attention, add_temp_encoder = model_params.attgcn_add_joint_attention, model_params.attgcn_add_temp_encoder
+            self.attgcn_model = ATT_GCN(num_nodes, neighbor_base, num_classes, add_joint_attention=add_joint_attention, add_temp_encoder=add_temp_encoder, i3d_add_temp_encoder=i3d_add_temp_encoder) 
             self.final_feature_dim = self.attgcn_model.head[0].in_features
         else: # at least we use skeleton information 
             num_nodes, neighbor_base, num_classes, num_samples = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes, data_params.num_samples

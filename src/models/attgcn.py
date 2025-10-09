@@ -104,6 +104,7 @@ I3D Embedding
 
 class I3DEmbedding(nn.Module):
     def __init__(self,
+                 add_temp_encoder: bool = True,
                  E: int = 256,
                  P: int = 16,
                  target_T: int | None = None,
@@ -150,15 +151,17 @@ class I3DEmbedding(nn.Module):
         self.register_buffer("pe2d", pe2d, persistent=False)
 
         # -------- 時序 Transformer（沿 T 建模；輸出維度不變）--------
-        enc_layer = nn.TransformerEncoderLayer(
-            d_model=E,
-            nhead=nheads,
-            dim_feedforward=E * ffn_mult,
-            dropout=drop,
-            batch_first=True,   # 讓輸入用 (N, T, E)
-            norm_first=True     # Pre-LN 比較穩
-        )
-        self.temporal_encoder = nn.TransformerEncoder(enc_layer, num_layers=n_layers)
+        self.add_temp_encoder = add_temp_encoder
+        if self.add_temp_encoder:
+            enc_layer = nn.TransformerEncoderLayer(
+                d_model=E,
+                nhead=nheads,
+                dim_feedforward=E * ffn_mult,
+                dropout=drop,
+                batch_first=True,   # 讓輸入用 (N, T, E)
+                norm_first=True     # Pre-LN 比較穩
+            )
+            self.temporal_encoder = nn.TransformerEncoder(enc_layer, num_layers=n_layers)
 
     def forward(self, flows: torch.Tensor) -> torch.Tensor:
         B = flows.size(0)
@@ -215,8 +218,9 @@ class I3DEmbedding(nn.Module):
 
         # 加 1D 時間位置（再次加在 Transformer 輸入；保持明確的時序偏置）
         x = x + pe1d.view(1, T, self.E)
-
-        x = self.temporal_encoder(x)               # (B*P, T, E)
+        
+        if self.add_temp_encoder:
+            x = self.temporal_encoder(x)               # (B*P, T, E)
         x = x.view(B, self.P, T, self.E).permute(0, 2, 1, 3).contiguous()  # (B,T,P,E)
 
         # 8) to (B,E,T,P)
@@ -284,6 +288,8 @@ class ATT_GCN(nn.Module):
     """
     def __init__(self,
                  num_nodes, neighbor_base, num_classes,
+                 add_joint_attention=True,
+                 add_temp_encoder=True,
                  E=256,
                  P=16,
                  # 融合/Transformer 參數
@@ -293,6 +299,7 @@ class ATT_GCN(nn.Module):
                  depth_temporal=4,
                  drop=0.1,
                  # I3D backbone 參數（視你的 I3DEmbedding 而定）
+                 i3d_add_temp_encoder=True,
                  i3d_target_T=None,
                  i3d_Cb=256,
                  i3d_hidden=256,
@@ -308,7 +315,7 @@ class ATT_GCN(nn.Module):
         graph = Graph(num_nodes=num_nodes, neighbor_base=neighbor_base)
         A = graph.A  # (3, V, V)
         self.kp_encoder = KP_EMBEDDING(A)  # 假設輸出通道最終為 E=256
-        self.vid_encoder = I3DEmbedding(
+        self.vid_encoder = I3DEmbedding(add_temp_encoder=i3d_add_temp_encoder,
             E=E, P=P, target_T=i3d_target_T, Cb=i3d_Cb, drop=i3d_drop,
             hidden=i3d_hidden, nheads=i3d_nheads, n_layers=i3d_nlayers, ffn_mult=i3d_ffn_mult
         )
@@ -324,15 +331,19 @@ class ATT_GCN(nn.Module):
         nn.init.trunc_normal_(self.mod_embed_vid, std=0.02)
 
         # 3) 時間步內的跨模態注意 + 混合注意
-        self.cross_blocks = nn.ModuleList([CrossAttnBlock(E, nheads, drop) for _ in range(depth_cross)])
-        self.joint_blocks = nn.ModuleList([JointSelfAttnBlock(E, nheads, drop) for _ in range(depth_joint)])
+        self.add_joint_attention =  add_joint_attention
+        if self.add_joint_attention:
+            self.cross_blocks = nn.ModuleList([CrossAttnBlock(E, nheads, drop) for _ in range(depth_cross)])
+            self.joint_blocks = nn.ModuleList([JointSelfAttnBlock(E, nheads, drop) for _ in range(depth_joint)])
 
         # 4) 逐 token 的時序 Transformer
-        enc_layer = nn.TransformerEncoderLayer(
-            d_model=E, nhead=nheads, dim_feedforward=E*4, dropout=drop,
-            batch_first=True, norm_first=True, activation="gelu"
-        )
-        self.temporal_encoder = nn.TransformerEncoder(enc_layer, num_layers=depth_temporal)
+        self.add_temp_encoder = add_temp_encoder
+        if self.add_temp_encoder:
+            enc_layer = nn.TransformerEncoderLayer(
+                d_model=E, nhead=nheads, dim_feedforward=E*4, dropout=drop,
+                batch_first=True, norm_first=True, activation="gelu"
+            )
+            self.temporal_encoder = nn.TransformerEncoder(enc_layer, num_layers=depth_temporal)
 
         # 5) 分類頭
         self.head_norm = nn.LayerNorm(E)
@@ -390,21 +401,25 @@ class ATT_GCN(nn.Module):
         mask_vid_bt = None  # slot 通常不需要 mask
 
         # Cross-Attn
-        for blk in self.cross_blocks:
-            kp_bt, vid_bt = blk(kp_bt, vid_bt, mask_a=mask_kp_bt, mask_b=mask_vid_bt)
+        if self.add_joint_attention:
+            for blk in self.cross_blocks:
+                kp_bt, vid_bt = blk(kp_bt, vid_bt, mask_a=mask_kp_bt, mask_b=mask_vid_bt)
 
-        # Joint Self-Attn
-        x = torch.cat([kp_bt, vid_bt], dim=1)  # (B*T, V+P, E)
-        joint_mask = None
-        if mask_kp_bt is not None:
-            zeros_vid = torch.zeros(B*T_kp, P, dtype=torch.bool, device=x.device)
-            joint_mask = torch.cat([mask_kp_bt, zeros_vid], dim=1)
-        for blk in self.joint_blocks:
-            x = blk(x, key_padding_mask=joint_mask)  # (B*T, V+P, E)
+            # Joint Self-Attn
+            x = torch.cat([kp_bt, vid_bt], dim=1)  # (B*T, V+P, E)
+            joint_mask = None
+            if mask_kp_bt is not None:
+                zeros_vid = torch.zeros(B*T_kp, P, dtype=torch.bool, device=x.device)
+                joint_mask = torch.cat([mask_kp_bt, zeros_vid], dim=1)
+            for blk in self.joint_blocks:
+                x = blk(x, key_padding_mask=joint_mask)  # (B*T, V+P, E)
+        else:
+            x = torch.cat([kp_bt, vid_bt], dim=1)
 
         # === 逐 token 的時序 Transformer（時間注意力）===
         x = x.view(B, T_kp, V+P, E).permute(0, 2, 1, 3).contiguous().view(B*(V+P), T_kp, E)  # (B*(V+P), T, E)
-        x = self.temporal_encoder(x)  # (B*(V+P), T, E)
+        if self.add_temp_encoder:
+            x = self.temporal_encoder(x)  # (B*(V+P), T, E)
         x = x.view(B, V+P, T_kp, E)
 
         # === 池化 + 分類 ===

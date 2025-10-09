@@ -253,7 +253,7 @@ class ModelArguments:
     )
     is_attgcn_stream: bool = field(
         default=False,
-        metadata={"help":"TBD"}
+        metadata={"help":"The stream for the attention between joints and flows"}
     )
     I3D_weights_dir_name: str = field(
         default="I3D",
@@ -270,6 +270,18 @@ class ModelArguments:
     I3D_project_dim: int = field(
         default=256,
         metadata={"help":"Project to have the similar size with ST-GCN"}
+    )
+    attgcn_flow_embedding_add_temp_encoder: bool = field(
+        default=True,
+        metadata={"help":"Whether adding temp encoder in the flow embedding"}
+    )
+    attgcn_add_joint_attention: bool = field(
+        default=True,
+        metadata={"help":"Whether adding joint attention in the attgcn"}
+    )
+    attgcn_add_temp_encoder: bool = field(
+        default=True,
+        metadata={"help":"Whether adding temp encoder in the attgcn"}
     )
     
     
