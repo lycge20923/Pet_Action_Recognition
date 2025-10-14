@@ -7,10 +7,8 @@ parameters:
   fold_num:
     values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["formal:attgcn stream"]
-  batch_size:
-    values: [8]
-  is_attgcn_stream:
+    values: ["formal:i3dgcn stream"]
+  is_i3dgcn_stream:
     values: [True]
   patient_epochs:
     values: [100]
