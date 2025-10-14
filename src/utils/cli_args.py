@@ -251,9 +251,9 @@ class ModelArguments:
         default=False, 
         metadata={"help":"The bone stream"}
     )
-    is_attgcn_stream: bool = field(
+    is_i3dgcn_stream: bool = field(
         default=False,
-        metadata={"help":"The stream for the attention between joints and flows"}
+        metadata={"help":"The stream for the i3dgcn stream, which contain joints and flows"}
     )
     I3D_weights_dir_name: str = field(
         default="I3D",
@@ -270,18 +270,6 @@ class ModelArguments:
     I3D_project_dim: int = field(
         default=256,
         metadata={"help":"Project to have the similar size with ST-GCN"}
-    )
-    attgcn_flow_embedding_add_temp_encoder: bool = field(
-        default=True,
-        metadata={"help":"Whether adding temp encoder in the flow embedding"}
-    )
-    attgcn_add_joint_attention: bool = field(
-        default=True,
-        metadata={"help":"Whether adding joint attention in the attgcn"}
-    )
-    attgcn_add_temp_encoder: bool = field(
-        default=True,
-        metadata={"help":"Whether adding temp encoder in the attgcn"}
     )
     
     
@@ -425,6 +413,10 @@ class TrainingArguments:
         default=True,
         metadata={"help":"Add contrastive loss"}
     )
+    add_similarity_loss: bool = field(
+        default=True,
+        metadata={"help":"For I3DGCN, whether to add similarity loss"}
+    )
     contrastive_loss_coefficient: float = field(
         default=0.4,
         metadata={"help":"The coefficient for adding contrastive loss"}
@@ -441,7 +433,7 @@ class TrainingArguments:
         default="details.json",
         metadata={"help": "The file name for saving predict details(could set None not to save)"}
     )
-    use_multiplie_learning_rates: bool = field(
+    use_multiple_learning_rates: bool = field(
         default=False,
         metadata={"help": "Since we use multiple branch, \
             thus we experiment for different learning rate for different branches"}

@@ -18,7 +18,7 @@ from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
 from src.dataset.dataset import KpOfDataset, SiameseKpOfDataset
 from src.utils.cli_args import DataArguments, ModelArguments, TrainingArguments, AugmentationArguments
-from src.utils.common import load_from_wandb, custom_collate, set_seed
+from src.utils.common import *
 
 def setup_experiments():
     # set wandb
@@ -79,8 +79,8 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
    
-    load_kps = (not (model_params.is_I3D_stream)) or model_params.is_attgcn_stream
-    load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream or model_params.is_attgcn_stream
+    load_kps = (not (model_params.is_I3D_stream)) or model_params.is_i3dgcn_stream
+    load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream or model_params.is_i3dgcn_stream
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
     train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
     
@@ -226,29 +226,22 @@ def train_one_epoch(model,
             kp1, kp2 = kp1.to(device) if kp1 is not None else None, kp2.to(device) if kp2 is not None else None
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
-            y = y.to(device)
-            emb1, logit1= model(kp1, flow1)
-            emb2, logit2 = model(kp2 ,flow2)
+            y = y.to(device)            
+            emb1, logit1, cos_loss_1 = model(kp1, flow1)
+            emb2, logit2, cos_loss_2 = model(kp2 ,flow2)
             
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
             loss_ce_part2 = cross_entropy_loss(logit2, lab2)
-            batch_loss_ce = loss_ce_part1 + loss_ce_part2 
+            batch_loss_ce = loss_ce_part1 + loss_ce_part2
             
             batch_loss_cl = contrastive_loss(emb1, emb2, y) * train_params.contrastive_loss_coefficient
             wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
             
             batch_loss_total = batch_loss_ce + batch_loss_cl 
+            if train_params.add_similarity_loss and (cos_loss_1 is not None and cos_loss_2 is not None):
+                batch_loss_total += (cos_loss_1 + cos_loss_2)
             batch_loss_total.backward()
-            
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         print(
-            #             name,
-            #             "mean:", f"{param.grad.mean().item():.5f}",
-            #             "std:",  f"{param.grad.std().item():.5f}",
-            #             "norm:", f"{param.grad.norm().item():.5f}"
-            #         )
             
             optimizer.step()
             
@@ -265,9 +258,12 @@ def train_one_epoch(model,
             kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
             label = label.to(device)
             
-            _, output = model(kps, flow)
+            _, output, cos_loss = model(kps, flow)
+
             batch_loss_ce = cross_entropy_loss(output, label)
             batch_loss_total = batch_loss_ce
+            if train_params.add_similarity_loss and cos_loss is not None:
+                batch_loss_total += cos_loss
             
             batch_loss_total.backward() 
             optimizer.step()
@@ -289,7 +285,8 @@ def val_one_epoch(model,
                   cross_entropy_loss, 
                   epoch, 
                   actions:list, 
-                  train_params:TrainingArguments):
+                  train_params:TrainingArguments,
+                  ref_models=None):
     model.eval()
     test_correct = 0
     test_loss = 0
@@ -312,14 +309,25 @@ def val_one_epoch(model,
             label = label.to(device)
             
             if train_params.add_contrastive_loss:
-                _, output = model.backbone(kps, flow)
+                _, output, cos_loss = model.backbone(kps, flow)
             else:
-                _, output = model(kps, flow)
+                _, output, cos_loss = model(kps, flow)
+                
             loss = cross_entropy_loss(output, label)
+            if train_params.add_similarity_loss and cos_loss is not None:
+                loss += cos_loss
             current_batch_size = label.size(0)
             total_samples += current_batch_size
             if not torch.isnan(loss).any():
                 test_loss += loss.item() * current_batch_size
+            
+            # for I3DGCN stream, we add other ref_models to chase best performance
+            if ref_models is not None:
+                for model_ in ref_models:
+                    model_.eval()
+                    _, logits, _ = model_(kps, flow)
+                    output += logits
+                
             _, predict = torch.max(output.data, 1)
             test_correct += (predict == label).sum().item()
             
@@ -422,11 +430,56 @@ def main():
     
     # start training 
     patient_count = 0 # for early stopping
+    
+    # for referring other models to chase best acc
+    if model_params.is_i3dgcn_stream:
+        def load_weights(dir_name:str):
+            data_params = DataArguments()
+            save_adjusted_args_name = train_params.save_adjusted_args_name
+            adjusted_params_path = os.path.join(dir_name, save_adjusted_args_name)
+            with open(adjusted_params_path, 'r') as f:
+                adjusted_params = yaml.safe_load(f)
+            
+            model_params = load_from_wandb(ModelArguments, adjusted_params)
+            checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
+            checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pth"
+            checkpoint_path = os.path.join(dir_name, checkpoint_name)
+            coords = None
+            if model_params.gcn_model_name == "stgcn":
+                coord_path = os.path.join(model_params.pretrained_weights_root_dir_name, model_params.gcn_weights_dir_name, model_params.stgcn_coords_file_name)
+                coords = np.load(coord_path)
+            model = ActionRecognitionModel(model_params, data_params, coords=coords).to(train_params.device)
+            ckpt = torch.load(checkpoint_path, map_location=train_params.device)
+            info = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+            print(f"Loading model from '{dir_name}' weights...")
+            print(f"Missing keys: {info.missing_keys}")
+            print(f"Unexpected keys:{info.unexpected_keys}")
+            
+            print(f"Loading whole pretrained weights from {checkpoint_path}")
+            return model
+        
+        def set_models(model_dirs:list):
+            models = []
+            for model_dir in model_dirs:
+                model = load_weights(dir_name=model_dir)
+                models.append(model)
+            return models
+        
+        fold_dir = os.path.join(model_params.pretrained_weights_root_dir_name, 
+                                model_params.self_training_weights_dir_name, 
+                                str(data_params.fold_num))
+        joints_stream_model_dir = os.path.join(fold_dir, "joints")
+        local_flow_stream_model_dir = os.path.join(fold_dir, "local_flow")
+        model_dirs = [joints_stream_model_dir, local_flow_stream_model_dir]
+        
+        ref_models = set_models(model_dirs)
+        
+    
     for epoch in range(1, train_params.epochs+1):
         train_loss, train_acc = train_one_epoch(model, train_loader, cross_entropy_loss, optimizer, epoch, train_params, contrastive_loss)
         print(f"Epoch {epoch+1} Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         
-        val_loss, val_acc, cm, all_details = val_one_epoch(model, val_loader, cross_entropy_loss, epoch, actions=data_params.actions, train_params=train_params)
+        val_loss, val_acc, cm, all_details = val_one_epoch(model, val_loader, cross_entropy_loss, epoch, actions=data_params.actions, train_params=train_params, ref_models=ref_models)
         print(f"Epoch {epoch+1} Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
         # save for plottting

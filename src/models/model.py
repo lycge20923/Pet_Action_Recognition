@@ -9,7 +9,7 @@ from .tdgcn import TD_GCN
 from .degcn import DE_GCN
 from .ctrgcn import CTR_GCN
 from .infogcn import Info_GCN
-from .attgcn import ATT_GCN
+from .i3dgcn import I3D_GCN
 from .I3D import InceptionI3d
 from ..utils.cli_args import ModelArguments, DataArguments, AugmentationArguments
 
@@ -26,7 +26,7 @@ class ActionRecognitionModel(nn.Module):
             "Train one stream at one time"
         self.is_I3D_stream = model_params.is_I3D_stream
         self.final_feature_dim = 0
-        self.is_attgcn_stream = model_params.is_attgcn_stream
+        self.is_i3dgcn_stream = model_params.is_i3dgcn_stream
         
         # augmentation
         self.aug_module = Augmentation(augment_params=aug_params)
@@ -55,13 +55,12 @@ class ActionRecognitionModel(nn.Module):
             self._projected_flow_feat_dim = model_params.I3D_project_dim
             self.flow_feature_projector = nn.Linear(model_params.I3D_raw_feat_dim, self._projected_flow_feat_dim)
             self.final_feature_dim = self._projected_flow_feat_dim
-        elif self.is_attgcn_stream:
-            print("Use attgcn(attentionGCN) model")
+        elif self.is_i3dgcn_stream:
+            print("Use I3D_GCN model")
             num_nodes, neighbor_base, num_classes = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes
-            i3d_add_temp_encoder = model_params.attgcn_flow_embedding_add_temp_encoder
-            add_joint_attention, add_temp_encoder = model_params.attgcn_add_joint_attention, model_params.attgcn_add_temp_encoder
-            self.attgcn_model = ATT_GCN(num_nodes, neighbor_base, num_classes, add_joint_attention=add_joint_attention, add_temp_encoder=add_temp_encoder, i3d_add_temp_encoder=i3d_add_temp_encoder) 
-            self.final_feature_dim = self.attgcn_model.head[0].in_features
+            self.i3dgcn_model = I3D_GCN(num_nodes, neighbor_base, num_classes) 
+            self.final_feature_dim = self.i3dgcn_model.head[1].in_features
+            
         else: # at least we use skeleton information 
             num_nodes, neighbor_base, num_classes, num_samples = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes, data_params.num_samples
             is_local_flow_stream, is_frame_diff_stream, is_bone_stream = model_params.is_local_flow_stream, model_params.is_frame_diff_stream, model_params.is_bone_stream
@@ -95,20 +94,19 @@ class ActionRecognitionModel(nn.Module):
         # conduct augmentation
         skeleton, flow = self.aug_module(skeleton, flow)
         
-        # I3D stream
-        if self.is_I3D_stream:
+        cos_loss = None        
+        if self.is_I3D_stream: # I3D stream
             I3D_feat, _ = self.I3D(flow)
             feat = self.flow_feature_projector(I3D_feat)
-        # trial
-        elif self.is_attgcn_stream:
-            trial_feat, _ = self.attgcn_model(skeleton, flow)
+        elif self.is_i3dgcn_stream: # i3dgcn stream
+            trial_feat, _, cos_loss = self.i3dgcn_model(skeleton, flow)
             feat = trial_feat
-        # skeleton stream
-        else:
+        else: # skeleton stream
             skel_feat, _ = self.skel_model(skeleton, flow)
             feat = skel_feat
         main_task_logits = self.final_classifier(feat)
-        return feat, main_task_logits
+        
+        return feat, main_task_logits, cos_loss
 
 class ContrastiveActionWrapper(nn.Module):
     def __init__(self, backbone: ActionRecognitionModel, emb_dim:int):
@@ -122,6 +120,6 @@ class ContrastiveActionWrapper(nn.Module):
         feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow, labels=labels)
     '''
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
-        feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow)
+        feat_from_backbone, main_logits, cos_loss = self.backbone(skeleton, flow=flow)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
-        return emb, main_logits
+        return emb, main_logits, cos_loss

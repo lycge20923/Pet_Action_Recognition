@@ -36,7 +36,7 @@ def parse_args():
     parser.add_argument('--joints_stream_checkpoint_dir', default=None, help="Skeleton model(joints) checkpoint dir")
     parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
     parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
-    parser.add_argument('--attgcn_stream_checkpoint_dir', default=None, help="Attgcn checkpoint dir")
+    parser.add_argument('--i3dgcn_stream_checkpoint_dir', default=None, help="I3D_GCN checkpoint dir")
     parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
     
     return parser.parse_args()
@@ -192,7 +192,7 @@ def predict():
         samples.append(fn)
     
     # ---set main models---
-    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.attgcn_stream_checkpoint_dir]
+    model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir]
     models = set_models(model_dirs)
     
     # ---prediction ---

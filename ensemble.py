@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument("--joints_stream", action="store_true", help="Use joints stream")
     parser.add_argument("--local_flow_stream", action="store_true", help="Use local flow stream")
     parser.add_argument("--diff_stream", action="store_true", help="Use diff stream")
-    parser.add_argument('--attgcn_stream', action="store_true", help="Use attgcn stream")
+    parser.add_argument('--i3dgcn_stream', action="store_true", help="Use I3D_GCN stream")
     parser.add_argument("--I3D_stream", action="store_true", help="Use I3D stream")
     parser.add_argument("--joints_gcn_name", default="degcn", choices=["ctrgcn", "infogcn", "stgcn", "tdgcn", "degcn"], help="(ablation study) choose different gcn name if needed")
     
@@ -35,7 +35,7 @@ def parse_args():
     parser.add_argument('--joints_stream_checkpoint_dir', default=None, help="Skeleton model(joints) checkpoint dir")
     parser.add_argument("--local_flow_stream_checkpoint_dir", default=None, help="Skeleton model(flow) checkpoint dir")
     parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
-    parser.add_argument('--attgcn_stream_checkpoint_dir', default=None, help="Attgcn checkpoint dir")
+    parser.add_argument('--i3dgcn_stream_checkpoint_dir', default=None, help="I3D_GCN checkpoint dir")
     parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
     return parser.parse_args()
 
@@ -80,9 +80,9 @@ def set_models(model_dirs:list):
         raise ValueError('The fold number of all model should be the same')
     return models, fold_num
 
-def set_dataloaders(joints, local_flow, diff, attgcn, I3D, fold_num):
-    load_kps = joints or local_flow or diff or attgcn
-    load_flows = local_flow or attgcn or I3D
+def set_dataloaders(joints, local_flow, diff, i3dgcn, I3D, fold_num):
+    load_kps = joints or local_flow or diff or i3dgcn
+    load_flows = local_flow or i3dgcn or I3D
     aug_params_eval = AugmentationArguments(augment=False)
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
@@ -133,8 +133,8 @@ def main():
                 save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}"))
         if args.local_flow_stream:
             save_subdir.append("local_flow")
-        if args.attgcn_stream:
-            save_subdir.append("attgcn")
+        if args.i3dgcn_stream:
+            save_subdir.append("i3dgcn")
         if args.I3D_stream:
             save_subdir.append("I3D")
         
@@ -151,7 +151,7 @@ def main():
         
     else:
         # set models
-        model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.attgcn_stream_checkpoint_dir]
+        model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir]
         models, fold_num = set_models(model_dirs)
         
         fold_ids = [fold_num]
@@ -181,9 +181,9 @@ def main():
         
         # load data loader
         if args.five_fold_val:
-            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.attgcn_stream, args.I3D_stream, fold_id)
+            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.i3dgcn_stream, args.I3D_stream, fold_id)
         else:
-            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.attgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id)
+            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id)
         
         count_samples += len(val_loader.dataset)
         with torch.no_grad():
@@ -195,7 +195,7 @@ def main():
                 total_logits = 0
                 for model in models:
                     model.eval()
-                    _, logits = model(kps, flow)
+                    _, logits, _ = model(kps, flow)
                     total_logits += logits
                     
                 current_batch_size = label.size(0)
