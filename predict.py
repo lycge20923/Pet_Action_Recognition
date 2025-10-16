@@ -208,7 +208,7 @@ def predict():
             total_logits = 0
             for model in models:
                 model.eval()
-                _, logits = model(kps, fl)
+                _, logits, _ = model(kps, fl)
                 total_logits += logits
             
             prob = F.softmax(total_logits, dim=1)[0]
@@ -304,22 +304,19 @@ def predict():
     logger.info(f"Saved per-window predictions to {out_fp}")
     
     # plot 
+    # --- plot (依 y 值是否低於 0.5 決定顏色) ---
     probs_arr = np.stack(all_probs, axis=0)           # [n_windows, n_classes]
     preds = np.array(window_results, dtype=int)       # [n_windows]
     actions = data_params.actions
     n, _ = probs_arr.shape
 
-    # get gt-truth 
     gt_idx = None
     if gt_label is not None:
         gt_idx = actions.index(gt_label)
 
     win = data_params.window_size
-    xs_center = (np.arange(n) * win + win / 2.0) / fps 
-    xs_start  = (np.arange(n) * win) / fps    
-    xs_end    = ((np.arange(n) + 1) * win) / fps 
+    xs_center = (np.arange(n) * win + win / 2.0) / fps
 
-    # 折線：若有 GT → 畫該類別的機率；否則退回 Top-1 機率
     if gt_idx is not None:
         y = probs_arr[:, gt_idx]
         y_label = f"P(GT={actions[gt_idx]})"
@@ -333,26 +330,28 @@ def predict():
     ax.set_ylabel(y_label)
     ax.set_title(f"{base} - {y_label} over time")
 
-    if n >= 2:
-        # 以相鄰兩點形成線段，依「左端點是否預測為GT」上色
-        pts = np.column_stack([xs_center, y])              # [n, 2]
-        segs = np.stack([pts[:-1], pts[1:]], axis=1)       # [n-1, 2, 2]
+    threshold = 0.5
+    for i in range(n - 1):
+        x1, x2 = xs_center[i], xs_center[i + 1]
+        y1, y2 = y[i], y[i + 1]
 
-        if (gt_idx is not None):
-            ok = (preds[:-1] == gt_idx)                    # [n-1]
-            colors = np.where(ok, 'green', 'red')          # 綠=正確、紅=錯誤
+        # 是否跨越閾值 (0.5)
+        if (y1 - threshold) * (y2 - threshold) < 0:
+            t = (threshold - y1) / (y2 - y1)
+            xc = x1 + t * (x2 - x1)
+            yc = threshold
+            color1 = 'green' if y1 >= threshold else 'red'
+            ax.plot([x1, xc], [y1, yc], color=color1, linewidth=3, solid_capstyle='round')
+            color2 = 'green' if y2 >= threshold else 'red'
+            ax.plot([xc, x2], [yc, y2], color=color2, linewidth=3, solid_capstyle='round')
         else:
-            colors = np.array(['tab:blue'] * (n - 1))      # 無GT就全藍
+            color = 'green' if (y1 >= threshold and y2 >= threshold) else 'red'
+            ax.plot([x1, x2], [y1, y2], color=color, linewidth=3, solid_capstyle='round')
 
-        lc = LineCollection(segs, colors=colors, linewidths=2)
-        ax.add_collection(lc)
+    # # 畫中心點
+    # ax.scatter(xs_center, y, s=30, c=['green' if v >= threshold else 'red' for v in y], zorder=3)
 
-        # 讓座標軸覆蓋到整段時間
-        ax.set_xlim(xs_center[0], xs_center[-1])
-    else:
-        # 只有一個點時，畫個點避免空白
-        ax.plot(xs_center, y, marker='o', color='green' if (gt_idx is not None and preds[0]==gt_idx) else 'red', linewidth=0)
-
+    ax.set_xlim(xs_center[0], xs_center[-1])
     plt.tight_layout()
     curve_path = os.path.join(output_dir, f"{base}_gt_confidence_curve.png")
     plt.savefig(curve_path, dpi=150)

@@ -79,7 +79,7 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
    
-    load_kps = (not (model_params.is_I3D_stream)) or model_params.is_i3dgcn_stream
+    load_kps = model_params.is_I3D_stream or model_params.is_i3dgcn_stream
     load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream or model_params.is_i3dgcn_stream
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
     train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
@@ -432,7 +432,7 @@ def main():
     patient_count = 0 # for early stopping
     
     # for referring other models to chase best acc
-    if model_params.is_i3dgcn_stream:
+    if model_params.is_i3dgcn_stream or model_params.is_I3D_stream:
         def load_weights(dir_name:str):
             data_params = DataArguments()
             save_adjusted_args_name = train_params.save_adjusted_args_name
