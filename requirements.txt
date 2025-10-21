@@ -14,3 +14,6 @@ huggingface_hub
 safetensors
 einops
 dropbox
+kagglehub
+datasets
+natsort

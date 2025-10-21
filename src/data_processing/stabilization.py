@@ -6,12 +6,19 @@ from datetime import datetime
 import time
 from tqdm import tqdm
 from vidgear.gears import VideoGear
+import argparse
 
 from ..utils.logging_utils import setup_logger
 from ..utils.cli_args import DataArguments
 from ..utils.common import get_video_info
 
-
+def adjust_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", default=None, help="Adjusted data root dir path")
+    parser.add_argument("--stabilized_dir_name", default=None, help="Adjusted stabilized data dir path")
+    parser.add_argument("--seg_dir_name", default=None, help="Adjusted segemneted dir path")
+    return parser.parse_args()
+    
 def video_stabilization(video_path:str, crop_percentage:float) -> np.ndarray:
     '''
     Purpose: Conduct video stabilization on a given video file.
@@ -59,6 +66,14 @@ def main():
     # get parameters
     data_args = DataArguments()
     
+    adjusted_args = adjust_args()
+    if adjusted_args.data_dir is not None:
+        data_args.data_dir = adjusted_args.data_dir
+    if adjusted_args.stabilized_dir_name is not None:
+        data_args.stabilized_dir_name = adjusted_args.stabilized_dir_name
+    if adjusted_args.seg_dir_name is not None:
+        data_args.seg_dir_name = adjusted_args.seg_dir_name
+    
     # set logging 
     logger = setup_logger(file_path=__file__, level=logging.INFO)
     
@@ -90,7 +105,7 @@ def main():
             for stabilized_img in stabilized_imgs_np:
                 writer.write(stabilized_img)
             writer.release()
-            logger.info(f"Input:'{os.path.basename(input_path):.4f}', Execution FPS: {exec_fps:.4f}")
+            logger.info(f"Input:'{os.path.basename(input_path)}', Execution FPS: {exec_fps:.4f}")
             
         except Exception as e:
             logger.error(f"Input:{os.path.basename(input_path)}, Error happens: {e}")

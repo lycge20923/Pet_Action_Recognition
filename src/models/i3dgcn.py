@@ -394,10 +394,6 @@ class I3D_GCN(nn.Module):
         self.i3d_embed = InceptionI3d(
             E=E, P=P, in_channels=2
         )                                                # (B, E, T, P)
-
-        # --- Projections to the same latent space ---
-        # self.kp_proj  = nn.Linear(E * V, E_proj, bias=True)
-        # self.i3d_proj = nn.Linear(E * P, E_proj, bias=True)
         
         self.kp_proj = nn.Sequential(
             nn.Linear(E * V, 512, bias=False),
