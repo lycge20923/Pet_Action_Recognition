@@ -10,14 +10,7 @@ import argparse
 
 from ..utils.logging_utils import setup_logger
 from ..utils.cli_args import DataArguments
-from ..utils.common import get_video_info
-
-def adjust_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", default=None, help="Adjusted data root dir path")
-    parser.add_argument("--stabilized_dir_name", default=None, help="Adjusted stabilized data dir path")
-    parser.add_argument("--seg_dir_name", default=None, help="Adjusted segemneted dir path")
-    return parser.parse_args()
+from ..utils.common import get_video_info, set_comparison_config, set_comparison_config_args
     
 def video_stabilization(video_path:str, crop_percentage:float) -> np.ndarray:
     '''
@@ -66,13 +59,9 @@ def main():
     # get parameters
     data_args = DataArguments()
     
-    adjusted_args = adjust_args()
-    if adjusted_args.data_dir is not None:
-        data_args.data_dir = adjusted_args.data_dir
-    if adjusted_args.stabilized_dir_name is not None:
-        data_args.stabilized_dir_name = adjusted_args.stabilized_dir_name
-    if adjusted_args.seg_dir_name is not None:
-        data_args.seg_dir_name = adjusted_args.seg_dir_name
+    comparison_args = set_comparison_config_args()
+    if comparison_args.for_comparison:
+        data_args = set_comparison_config(data_args, comparison_args.dataset_name)
     
     # set logging 
     logger = setup_logger(file_path=__file__, level=logging.INFO)

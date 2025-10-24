@@ -1,3 +1,4 @@
+import argparse
 import cv2
 import dataclasses
 import numpy as np
@@ -159,6 +160,27 @@ def custom_collate(batch):
         collated_kp = default_collate(kp_list) if (kp_list and kp_list[0] is not None) else None
         collated_flow = default_collate(flow_list) if (flow_list and flow_list[0] is not None) else None
         return collated_kp, collated_flow, collated_lab, name_lab
+
+def set_comparison_config(data_args:DataArguments, dataset_name:str):
+    COMPARISON_DATASETS = {"BaboonLand":"BaboonLand/charades", "KABR":"KABR/KABR_files"}
+    if dataset_name not in COMPARISON_DATASETS.keys():
+        raise ValueError("You have to send the correct dataset name, or o.w. you have to set the dataset.")
+    sub_path = COMPARISON_DATASETS[dataset_name]
+    data_args.data_dir = "data/others"
+    data_args.seg_dir_name = os.path.join("raw", sub_path, "dataset/video")
+    data_args.stabilized_dir_name = os.path.join(dataset_name, "stabilized")
+    data_args.feature_extract_dir_name = os.path.join(dataset_name, "feature_extracted")
+    data_args.trainsplit_dir_name = os.path.join(dataset_name, "train_split")
+    data_args.window_size = 65
+    data_args.num_samples = 32
+    data_args.min_kp_rate = 0
+    return data_args
+
+def set_comparison_config_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--for_comparison", action="store_true", help="Whether compared to other dataset")
+    parser.add_argument("--dataset_name", choices=["BaboonLand", "KABR"])
+    return parser.parse_args()
 
 def set_seed(seed):
     random.seed(seed)

@@ -6,12 +6,13 @@ import random
 import gc
 from tqdm import tqdm
 from collections import defaultdict, Counter
+import math
 
 from sklearn.model_selection import StratifiedGroupKFold
 
 from ..utils.cli_args import DataArguments
 from ..utils.logging_utils import setup_logger
-
+from ..utils.common import set_comparison_config, set_comparison_config_args
 
 def build_source_action_vectors(all_samples):
     """
@@ -97,7 +98,7 @@ def assign_sources_to_folds_balanced(sources, src2vec, total, K=5, seed=42, cove
 
     return assign
 
-def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir):
+def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir, for_comparison):
     """
     For each clip annotation, slice into windows, sample frames,
     save each window's features once, and return a flat list of metadata.
@@ -108,38 +109,30 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
         data = np.load(ann["feature_file_path"])
         kps = data["keypoints"]
         ofs = data["optical_flows"]
-        n_windows = kps.shape[0] // window_size
+        if for_comparison:
+            n_windows = math.ceil(kps.shape[0] / window_size)
+        else:
+            n_windows = kps.shape[0] // window_size
         
         kp_buf = np.empty((num_samples, *kps.shape[1:]), dtype=kps.dtype)
         of_buf = np.empty((num_samples, *ofs.shape[1:]), dtype=ofs.dtype)
 
         for w in range(n_windows):
-            idxs = np.linspace(
-                w * window_size,
-                (w + 1) * window_size - 1,
-                num_samples,
-                dtype=int
-            )
-            '''
-            kp_s = kps[idxs]
-            of_s = ofs[idxs]
-
-            feat_path = os.path.join(np_save_dir, f"{sample_id:06d}.npz")
-            np.savez_compressed(
-                feat_path,
-                keypoints=kp_s,
-                optical_flows=of_s
-            )
-
-            all_meta.append({
-                "sample_id":        sample_id,
-                "feature_file":     feat_path,
-                "video_name":       ann["video_name"],
-                "source_video_id":  ann["source_video_id"],
-                "action_id":        ann["action_id"],
-                "window_index":     w
-            })
-            '''
+            if for_comparison:
+                idxs = np.linspace(
+                    w * window_size,
+                    (w + 1) * window_size - 1,
+                    num_samples,
+                    dtype=int
+                )
+                idxs = np.clip(idxs, 0, kps.shape[0] - 1)
+            else:
+                idxs = np.linspace(
+                    w * window_size,
+                    (w + 1) * window_size - 1,
+                    num_samples,
+                    dtype=int
+                )
             
             np.take(kps, idxs, axis=0, out=kp_buf)
             np.take(ofs, idxs, axis=0, out=of_buf)
@@ -150,7 +143,7 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
             np.save(kp_feat_path, kp_buf)
             np.save(of_feat_path, of_buf)
             
-            all_meta.append({
+            store_dict = {
                 "sample_id":        sample_id,
                 "kp_feature_file":     kp_feat_path,
                 "of_feature_file": of_feat_path, 
@@ -158,8 +151,11 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
                 "source_video_id":  ann["source_video_id"],
                 "action_id":        ann["action_id"],
                 "window_index":     w
-            })
-            
+            }
+            if "split" in ann.keys(): # for comparison other 
+                store_dict["fold"] = 0 if ann["split"] == "val" else 1
+                
+            all_meta.append(store_dict)
             
             sample_id += 1
 
@@ -177,32 +173,39 @@ def compute_basic_stats(annotations, logger):
 
 def main():
     logger = setup_logger(__file__, level=logging.INFO)
-    args = DataArguments()
-    base = os.path.splitext(args.annotation_file_name)[0]
-    out_dir = os.path.join(args.data_dir, args.trainsplit_dir_name)
+    data_args = DataArguments()
+    
+    comparison_args = set_comparison_config_args()
+    if comparison_args.for_comparison:
+        data_args = set_comparison_config(data_args, comparison_args.dataset_name)
+    
+    base = os.path.splitext(data_args.annotation_file_name)[0]
+    out_dir = os.path.join(data_args.data_dir, data_args.trainsplit_dir_name)
     np_save_dir = os.path.join(out_dir, "npy")
     os.makedirs(np_save_dir, exist_ok=True)
 
     # load and filter clip-level annotations
     ann_fp = os.path.join(
-        args.data_dir,
-        args.feature_extract_dir_name,
-        args.annotation_file_name
+        data_args.data_dir,
+        data_args.feature_extract_dir_name,
+        data_args.annotation_file_name
     )
     with open(ann_fp) as f:
         raw_anns = json.load(f)
-    compute_basic_stats(raw_anns, logger)
+    if not comparison_args.for_comparison:
+        compute_basic_stats(raw_anns, logger)
     raw_anns = [
-        a for a in raw_anns if a.get('keypoint_detection_rate', 0) >= args.min_kp_rate
+        a for a in raw_anns if a.get('keypoint_detection_rate', 0) >= data_args.min_kp_rate
     ]
     logger.info(f"After filter: {len(raw_anns)} clip videos remain")
 
     # 1) window generation + save .npz once
     all_samples = generate_and_save_windows_once(
         raw_anns,
-        window_size=args.window_size,
-        num_samples=args.num_samples,
-        np_save_dir=np_save_dir
+        window_size=data_args.window_size,
+        num_samples=data_args.num_samples,
+        np_save_dir=np_save_dir,
+        for_comparison=comparison_args.for_comparison
     )
     # for temp test
     # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'r') as f:
@@ -212,31 +215,32 @@ def main():
     #     json.dump(all_samples, f)  
      
     logger.info(f"Saved {len(all_samples)} window samples (.npz)")
-    
-    # 2) Group-aware multi-class stratification on sources -> fold map（修正版）
-    sources, actions, src2vec, total = build_source_action_vectors(all_samples)
-    source2fold = assign_sources_to_folds_balanced(
-        sources, src2vec, total, K=args.num_folds, seed=42, coverage_bonus=1.0
-    )
-    
-    final_samples = []
-    for s in all_samples:
-        item = s.copy()
-        item['fold'] = source2fold[s['source_video_id']]
-        final_samples.append(item)
-    
-    # for logging
-    fold_srcs = defaultdict(list)
-    for src, f in source2fold.items():
-        fold_srcs[f].append(src)
-    
-    for fold in range(args.num_folds):
-        cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
-        sorted_cnt = {a: cnt.get(a,0) for a in sorted({s['action_id'] for s in all_samples})}
-        n_src = len(fold_srcs.get(fold, []))
-        n_samp = sum(sorted_cnt.values())
-        logger.info(f"[Fold {fold}] #sources={n_src}, #samples={n_samp}, per-action={sorted_cnt}")
+    if not comparison_args.for_comparison:
+        # 2) Group-aware multi-class stratification on sources -> fold map（修正版）
+        sources, actions, src2vec, total = build_source_action_vectors(all_samples)
+        source2fold = assign_sources_to_folds_balanced(
+            sources, src2vec, total, K=data_args.num_folds, seed=42, coverage_bonus=1.0
+        )
         
+        final_samples = []
+        for s in all_samples:
+            item = s.copy()
+            item['fold'] = source2fold[s['source_video_id']]
+            final_samples.append(item)
+    
+        # for logging
+        fold_srcs = defaultdict(list)
+        for src, f in source2fold.items():
+            fold_srcs[f].append(src)
+        
+        for fold in range(data_args.num_folds):
+            cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
+            sorted_cnt = {a: cnt.get(a,0) for a in sorted({s['action_id'] for s in all_samples})}
+            n_src = len(fold_srcs.get(fold, []))
+            n_samp = sum(sorted_cnt.values())
+            logger.info(f"[Fold {fold}] #sources={n_src}, #samples={n_samp}, per-action={sorted_cnt}")
+    else:
+        final_samples = all_samples
     # save final metadata
     meta_fp = os.path.join(out_dir, f"{base}_windows_metadata.json")
     with open(meta_fp, 'w') as f:
