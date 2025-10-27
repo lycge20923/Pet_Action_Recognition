@@ -172,7 +172,7 @@ def set_comparison_config(data_args:DataArguments, dataset_name:str):
     data_args.feature_extract_dir_name = os.path.join(dataset_name, "feature_extracted")
     data_args.trainsplit_dir_name = os.path.join(dataset_name, "train_split")
     data_args.window_size = 65
-    data_args.num_samples = 32
+    data_args.num_samples = 16
     data_args.min_kp_rate = 0
     return data_args
 

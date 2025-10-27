@@ -181,3 +181,4 @@ test/*
 wandb/*
 runs/*
 models/self_training/*
+models/comparison

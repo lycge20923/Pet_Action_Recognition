@@ -9,14 +9,14 @@ from .gcn.graph import Graph
 
 # KP 
 class KP_EMBEDDING(nn.Module):
-    def __init__(self, A):
+    def __init__(self, A, T=32):
         super().__init__()
         self.A = A
         self.blocks = nn.ModuleList([
-                Basic_Block(in_channels=3, out_channels=32, A=self.A, num_frame=32, eta=4),
-                Basic_Block(in_channels=32, out_channels=64, A=self.A, num_frame=32//2, eta=4, stride=2),
-                Basic_Block(in_channels=64, out_channels=128, A=self.A, num_frame=32//4, eta=4, stride=2),
-                Basic_Block(in_channels=128, out_channels=128, A=self.A, num_frame=32//4, eta=4),
+                Basic_Block(in_channels=3, out_channels=32, A=self.A, num_frame=T, eta=4),
+                Basic_Block(in_channels=32, out_channels=64, A=self.A, num_frame=T//2, eta=4, stride=2),
+                Basic_Block(in_channels=64, out_channels=128, A=self.A, num_frame=T//4, eta=4, stride=2),
+                Basic_Block(in_channels=128, out_channels=128, A=self.A, num_frame=T//4, eta=4),
                 ]
             )
     def forward(self, keypoints: torch.Tensor):
@@ -390,7 +390,7 @@ class I3D_GCN(nn.Module):
         # --- Embeddings ---
         graph = Graph(num_nodes=num_nodes, neighbor_base=neighbor_base)
         A = graph.A  # (3, V, V)
-        self.kp_embed  = KP_EMBEDDING(A)                 # (B, E, T, V)
+        self.kp_embed  = KP_EMBEDDING(A, T=T)                 # (B, E, T, V)
         self.i3d_embed = InceptionI3d(
             E=E, P=P, in_channels=2
         )                                                # (B, E, T, P)

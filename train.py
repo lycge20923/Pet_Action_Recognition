@@ -312,7 +312,7 @@ def val_one_epoch(model,
                 _, output, cos_loss = model.backbone(kps, flow)
             else:
                 _, output, cos_loss = model(kps, flow)
-                
+
             loss = cross_entropy_loss(output, label)
             if train_params.add_similarity_loss and cos_loss is not None:
                 loss += cos_loss
@@ -435,12 +435,12 @@ def main():
     # for referring other models to chase best acc
     if model_params.is_i3dgcn_stream or model_params.is_I3D_stream:
         def load_weights(dir_name:str):
-            data_params = DataArguments()
             save_adjusted_args_name = train_params.save_adjusted_args_name
             adjusted_params_path = os.path.join(dir_name, save_adjusted_args_name)
             with open(adjusted_params_path, 'r') as f:
                 adjusted_params = yaml.safe_load(f)
             
+            data_params = load_from_wandb(DataArguments, adjusted_params)
             model_params = load_from_wandb(ModelArguments, adjusted_params)
             checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
             checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pth"

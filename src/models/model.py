@@ -58,7 +58,7 @@ class ActionRecognitionModel(nn.Module):
         elif self.is_i3dgcn_stream:
             print("Use I3D_GCN model")
             num_nodes, neighbor_base, num_classes = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes
-            self.i3dgcn_model = I3D_GCN(num_nodes, neighbor_base, num_classes) 
+            self.i3dgcn_model = I3D_GCN(num_nodes, neighbor_base, num_classes, T=data_params.num_samples) 
             self.final_feature_dim = self.i3dgcn_model.head[1].in_features
             
         else: # at least we use skeleton information 

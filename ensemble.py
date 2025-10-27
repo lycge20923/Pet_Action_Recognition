@@ -30,6 +30,8 @@ def parse_args():
     parser.add_argument('--i3dgcn_stream', action="store_true", help="Use I3D_GCN stream")
     parser.add_argument("--I3D_stream", action="store_true", help="Use I3D stream")
     parser.add_argument("--joints_gcn_name", default="degcn", choices=["ctrgcn", "infogcn", "stgcn", "tdgcn", "degcn"], help="(ablation study) choose different gcn name if needed")
+    parser.add_argument("--complete_blocks", action="store_true", help="Use complete blocks")
+    parser.add_argument("--local_flow_block", default=5, type=int, help="For ablation study to test the local flow block")
     
     # for individual
     parser.add_argument('--joints_stream_checkpoint_dir', default=None, help="Skeleton model(joints) checkpoint dir")
@@ -125,14 +127,24 @@ def main():
             if args.joints_gcn_name == "degcn":
                 save_subdir.append("joints")
             else:
-                save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}"))
+                if not args.complete_blocks:
+                    save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}"))
+                else:
+                    save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}_complete"))
         if args.diff_stream:
             if args.joints_gcn_name == "degcn":
                 save_subdir.append(os.path.join("supplement", "diff"))
             else:
-                save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}"))
+                if not args.complete_blocks:
+                    save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}"))
+                else:
+                    save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}_complete"))
         if args.local_flow_stream:
-            save_subdir.append("local_flow")
+            if int(args.local_flow_block) == 5:
+                save_subdir.append("local_flow")
+            else:
+                save_subdir.append(os.path.join("supplement", f"local_flow_{str(args.local_flow_block)}"))
+            
         if args.i3dgcn_stream:
             save_subdir.append("i3dgcn")
         if args.I3D_stream:
