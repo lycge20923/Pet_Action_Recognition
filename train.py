@@ -357,6 +357,9 @@ def val_one_epoch(model,
     epoch_acc = test_correct / len(loader.dataset)
     epoch_loss = test_loss / len(loader.dataset)
     
+    per_class_acc = class_correct / (class_total + 1e-6)  # 避免除以0
+    macro_acc = per_class_acc[class_total > 0].mean().item()
+    
     # for precision, recall, f1
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
         all_trues,
@@ -380,7 +383,7 @@ def val_one_epoch(model,
         log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
         # log_dict[f"val_samples_class_{actions[i]}"] = class_total[i].item()
     wandb.log(log_dict)
-    print(f"Overall   Loss: {epoch_loss:.4f}, Acc: {epoch_acc:.4f}, "
+    print(f"Overall   Loss: {epoch_loss:.4f}, Micro Acc: {epoch_acc:.4f}, Marco Acc: {macro_acc:.4f} "
           f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
     print("Per-class:")
     for i in range(num_classes):
@@ -433,7 +436,7 @@ def main():
     
     ref_models = None
     # for referring other models to chase best acc
-    if model_params.is_i3dgcn_stream or model_params.is_I3D_stream:
+    if model_params.is_i3dgcn_stream:
         def load_weights(dir_name:str):
             save_adjusted_args_name = train_params.save_adjusted_args_name
             adjusted_params_path = os.path.join(dir_name, save_adjusted_args_name)

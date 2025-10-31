@@ -37,20 +37,21 @@ class ActionRecognitionModel(nn.Module):
             self.I3D = InceptionI3d(in_channels=2, num_classes=data_params.num_classes)
             
             # load weight 
-            i3d_weights_path = os.path.join(model_params.pretrained_weights_root_dir_name,
-                                                model_params.I3D_weights_dir_name,
-                                                model_params.I3D_weights_file_name)
-            i3d_state = torch.load(i3d_weights_path)
-            filtered = {}
-            for k, v in i3d_state.items():
-                if k.startswith("logits.") or "logits." in k:
-                    print(k)
-                    continue
-                filtered[k] = v
-            info = self.I3D.load_state_dict(filtered, strict=False)
-            print("Loading I3D pretrained weights...")
-            print("Missing keys:", info.missing_keys)
-            print("Unexpected keys:", info.unexpected_keys)
+            if model_params.load_i3d_weights:
+                i3d_weights_path = os.path.join(model_params.pretrained_weights_root_dir_name,
+                                                    model_params.I3D_weights_dir_name,
+                                                    model_params.I3D_weights_file_name)
+                i3d_state = torch.load(i3d_weights_path)
+                filtered = {}
+                for k, v in i3d_state.items():
+                    if k.startswith("logits.") or "logits." in k:
+                        print(k)
+                        continue
+                    filtered[k] = v
+                info = self.I3D.load_state_dict(filtered, strict=False)
+                print("Loading I3D pretrained weights...")
+                print("Missing keys:", info.missing_keys)
+                print("Unexpected keys:", info.unexpected_keys)
             
             self._projected_flow_feat_dim = model_params.I3D_project_dim
             self.flow_feature_projector = nn.Linear(model_params.I3D_raw_feat_dim, self._projected_flow_feat_dim)

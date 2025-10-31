@@ -43,15 +43,15 @@ def parse_args():
 
 def load_weights(dir_name:str):
     
-    data_params = DataArguments()
     save_adjusted_args_name = train_params.save_adjusted_args_name
     adjusted_params_path = os.path.join(dir_name, save_adjusted_args_name)
     with open(adjusted_params_path, 'r') as f:
         adjusted_params = yaml.safe_load(f)
     
     model_params = load_from_wandb(ModelArguments, adjusted_params)
+    data_params = load_from_wandb(DataArguments, adjusted_params)
     
-    fold_num = load_from_wandb(DataArguments, adjusted_params).fold_num
+    fold_num = data_params.fold_num
     checkpoint_names = [f for f in os.listdir(dir_name) if f.endswith(".pth")]
     checkpoint_name = checkpoint_names[0] if len(checkpoint_names) == 1 else "best.pth"
     checkpoint_path = os.path.join(dir_name, checkpoint_name)
@@ -67,22 +67,24 @@ def load_weights(dir_name:str):
     logger.info(f"Unexpected keys:{info.unexpected_keys}")
     
     logger.info(f"Loading whole pretrained weights from {checkpoint_path}")
-    return model, fold_num
+    return model, fold_num, data_params
 
 def set_models(model_dirs:list):
     models, fold_nums = [], []
+    data_dirs = []
     for model_dir in model_dirs:
         if model_dir is not None:
-            model, fold_num = load_weights(dir_name=model_dir)
+            model, fold_num, data_params = load_weights(dir_name=model_dir)
             models.append(model)
             fold_nums.append(fold_num)
-    if len(set(fold_nums)) == 1:
+            data_dirs.append(data_params.data_dir)
+    if len(set(fold_nums)) == 1 and len(set(data_dirs)) == 1:
         fold_num = fold_nums[0]
     else:
         raise ValueError('The fold number of all model should be the same')
-    return models, fold_num
+    return models, fold_num, data_params
 
-def set_dataloaders(joints, local_flow, diff, i3dgcn, I3D, fold_num):
+def set_dataloaders(joints, local_flow, diff, i3dgcn, I3D, fold_num, data_params):
     load_kps = joints or local_flow or diff or i3dgcn
     load_flows = local_flow or i3dgcn or I3D
     aug_params_eval = AugmentationArguments(augment=False)
@@ -102,17 +104,13 @@ def main():
     args = parse_args()
     
     # load parameters
-    global logger, train_params, data_params, device, actions, num_classes
+    global logger, train_params, device, actions, num_classes
     logger = setup_logger(file_path=__file__,level=logging.INFO)
     
     train_params = TrainingArguments()
     device = train_params.device
     
     output_params = ResultsArguments()
-    
-    data_params = DataArguments()
-    actions = data_params.actions
-    num_classes = len(actions)
     
     # set seed 
     set_seed(train_params.seed)
@@ -121,7 +119,7 @@ def main():
         model_params = ModelArguments()
         model_dir, st_dir = model_params.pretrained_weights_root_dir_name, model_params.self_training_weights_dir_name
         subroot_dir = os.path.join(model_dir, st_dir)
-        fold_ids = [i for i in range(data_params.num_folds)]
+        fold_ids = [i for i in range(DataArguments().num_folds)]
         save_subdir = []
         if args.joints_stream:
             if args.joints_gcn_name == "degcn":
@@ -153,7 +151,7 @@ def main():
         all_models = []
         for fold_id in fold_ids:
             model_dirs = [os.path.join(subroot_dir, str(fold_id), sub_dir) for sub_dir in save_subdir]
-            models, fold_num = set_models(model_dirs)
+            models, fold_num, data_params = set_models(model_dirs)
             all_models.append(models)
             
         # set output folder
@@ -164,7 +162,7 @@ def main():
     else:
         # set models
         model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir]
-        models, fold_num = set_models(model_dirs)
+        models, fold_num, data_params = set_models(model_dirs)
         
         fold_ids = [fold_num]
         
@@ -176,6 +174,8 @@ def main():
         output_dir = os.path.join(output_params.output_dir, f"ensemble_{timestamp}_{fold_num}")
         os.makedirs(output_dir, exist_ok=True)
         
+    actions = data_params.actions
+    num_classes = len(actions)
     
     # start eval
     test_correct = 0
@@ -193,9 +193,9 @@ def main():
         
         # load data loader
         if args.five_fold_val:
-            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.i3dgcn_stream, args.I3D_stream, fold_id)
+            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.i3dgcn_stream, args.I3D_stream, fold_id, data_params)
         else:
-            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id)
+            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id, data_params)
         
         count_samples += len(val_loader.dataset)
         with torch.no_grad():
@@ -270,6 +270,9 @@ def main():
     
     epoch_acc = test_correct / count_samples
     
+    per_class_acc = class_correct / (class_total + 1e-6)  # 避免除以0
+    macro_acc = per_class_acc[class_total > 0].mean().item()
+    
     # for precision, recall, f1
     per_class_prec, per_class_rec, per_class_f1, _ = precision_recall_fscore_support(
         all_trues,
@@ -291,7 +294,8 @@ def main():
         log_dict[f"val_recall_class_{action_name}"] = float(per_class_rec[i])
         log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
         
-    print(f"Overall Acc: {epoch_acc:.4f}, "
+    print(f"Overall Micro Acc: {epoch_acc:.4f}, "
+        f"Macro Acc: {macro_acc:.4f}, "
         f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
     print("Per-class:")
     for i in range(num_classes):

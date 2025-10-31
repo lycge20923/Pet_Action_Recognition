@@ -255,6 +255,10 @@ class ModelArguments:
         default=False,
         metadata={"help":"The stream for the i3dgcn stream, which contain joints and flows"}
     )
+    load_i3d_weights: bool = field(
+        default=True,
+        metadata={"help":"For comparison, whether loading i3d weights"}
+    )
     I3D_weights_dir_name: str = field(
         default="I3D",
         metadata={"help":"Dir to store pretrained weights for I3D"}
