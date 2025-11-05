@@ -118,19 +118,22 @@ def kp_diff_stats(keypoints: torch.Tensor):
 
 def custom_collate(batch):
     first_item = batch[0]
-    is_siamese = (len(first_item) == 4 and 
+    is_siamese = (len(first_item) == 5 and 
                   isinstance(first_item[0], tuple) and len(first_item[0]) == 2 and # (kp1,kp2)
                   isinstance(first_item[1], tuple) and len(first_item[1]) == 2 and # (flow1,flow2)
-                  isinstance(first_item[2], tuple) and len(first_item[2]) == 2)   # (lab1,lab2)
+                  isinstance(first_item[2], tuple) and len(first_item[2]) == 2 and # (rgb1, rgb2)
+                  isinstance(first_item[3], tuple) and len(first_item[3]) == 2)   # (lab1,lab2)
     # SiameseKpOfDataset
     if is_siamese:
         kp1_list = [item[0][0] for item in batch] # might have None
         kp2_list = [item[0][1] for item in batch]
         flow1_list = [item[1][0] for item in batch] # might have None
         flow2_list = [item[1][1] for item in batch]
-        lab1_list = [item[2][0] for item in batch]
-        lab2_list = [item[2][1] for item in batch]
-        y_list = [item[3] for item in batch]
+        rgb1_list = [item[2][0] for item in batch] # might have None
+        rgb2_list = [item[2][1] for item in batch]
+        lab1_list = [item[3][0] for item in batch]
+        lab2_list = [item[3][1] for item in batch]
+        y_list = [item[4] for item in batch]
 
         collated_lab1 = default_collate(lab1_list)
         collated_lab2 = default_collate(lab2_list)
@@ -141,17 +144,21 @@ def custom_collate(batch):
         collated_kp2 = default_collate(kp2_list) if (kp2_list and kp2_list[0] is not None) else None
         collated_flow1 = default_collate(flow1_list) if (flow1_list and flow1_list[0] is not None) else None
         collated_flow2 = default_collate(flow2_list) if (flow2_list and flow2_list[0] is not None) else None
+        collated_rgb1 = default_collate(rgb1_list) if (rgb1_list and rgb1_list[0] is not None) else None
+        collated_rgb2 = default_collate(rgb2_list) if (rgb2_list and rgb2_list[0] is not None) else None
         
         return (collated_kp1, collated_kp2), \
                (collated_flow1, collated_flow2), \
+               (collated_rgb1, collated_rgb2), \
                (collated_lab1, collated_lab2), \
                collated_y
     # KpOfDataset
     else: 
         kp_list = [item[0] for item in batch]
-        flow_list = [item[1] for item in batch] 
-        lab_list = [item[2] for item in batch]
-        name_list = [item[3] for item in batch]
+        flow_list = [item[1] for item in batch]
+        rgb_list = [item[2] for item in batch] 
+        lab_list = [item[3] for item in batch]
+        name_list = [item[4] for item in batch]
         
         collated_lab = default_collate(lab_list)
         name_lab = default_collate(name_list)
@@ -159,7 +166,8 @@ def custom_collate(batch):
         # special case for optical flow
         collated_kp = default_collate(kp_list) if (kp_list and kp_list[0] is not None) else None
         collated_flow = default_collate(flow_list) if (flow_list and flow_list[0] is not None) else None
-        return collated_kp, collated_flow, collated_lab, name_lab
+        collated_rgb = default_collate(rgb_list) if (rgb_list and rgb_list[0] is not None) else None
+        return collated_kp, collated_flow, collated_rgb, collated_lab, name_lab
 
 def set_comparison_config(data_args:DataArguments, dataset_name:str):
     COMPARISON_DATASETS = {"BaboonLand":"BaboonLand/charades", "KABR":"KABR/KABR_files"}

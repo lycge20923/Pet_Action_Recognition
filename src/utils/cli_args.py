@@ -114,6 +114,10 @@ class DataArguments:
         default=0,
         metadata={"help": "Fold number for k-fold cross-validation in the training step."}
     )
+    rgb_include: bool = field(
+        default=True, 
+        metadata={"help":"Whether add RGB data in the dataset."}
+    )
 
 @dataclass
 class PoseEstimationArguments:
@@ -263,9 +267,9 @@ class ModelArguments:
         default="I3D",
         metadata={"help":"Dir to store pretrained weights for I3D"}
     )
-    I3D_weights_file_name: str = field(
-        default="flow_imagenet.pt",
-        metadata={"help":"I3D pretrained weights file name"}
+    I3D_mode: Literal["flow", "rgb"] = field(
+        default="flow",
+        metadata={"help":"Whether train with rgb or flow I3D mode"}
     )
     I3D_raw_feat_dim: int = field(
         default=4096,

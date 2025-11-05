@@ -74,20 +74,16 @@ class Augmentation(nn.Module):
         
         self.valid_kpt_confidence_thresh = float(augment_params.valid_kpt_confidence_thresh)
     
-    def _pick_device(self, keypoints, flows):
+    def _pick_device(self, keypoints, flows, rgb):
         if keypoints is not None:
             return keypoints.device
         if flows is not None:
             return flows.device
+        if rgb is not None:
+            return rgb.device
         # 都是 None（理論上 forward 已避免），退回 CPU
         return torch.device("cpu")
     
-    '''
-    def _coin(self, device):
-        # True 表示要做 augmentation；False 表示跳過
-        return torch.rand((), device=device) >= 0.5
-    '''
-
     @torch.no_grad()
     def get_center(self, keypoints):
         """
@@ -154,36 +150,37 @@ class Augmentation(nn.Module):
         self,
         keypoints: torch.Tensor,  # (B,3,T,V)
         flows: torch.Tensor,      # (B,2,T,H,W)
+        rgbs: torch.Tensor,       # (B,3,T,H,W)
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply augmentations in the same ORDER as the original aug_func.
         (暫時只放呼叫順序；各函式會在下一步逐一實作)
         """
         if (not self.enable) or (not self.training):
-            return keypoints, flows
+            return keypoints, flows, rgbs
 
-        k, f = keypoints, flows
+        k, f, r = keypoints, flows, rgbs
 
         # 幾何（以 skeleton center 為 pivot）
-        k, f = self.rotate(k, f)
-        k, f = self.scale(k, f)
-        k, f = self.translate(k, f)
-        k, f = self.shear(k, f)
-        k, f = self.hflip(k, f)
+        k, f, r = self.rotate(k, f, r)
+        k, f, r = self.scale(k, f, r)
+        k, f, r = self.translate(k, f, r)
+        k, f, r = self.shear(k, f, r)
+        k, f, r = self.hflip(k, f, r)
 
         # 時間
-        k, f = self.frame_drop(k, f)
-        k, f = self.temporal_jitter(k, f)
+        k, f, r = self.frame_drop(k, f, r)
+        k, f, r = self.temporal_jitter(k, f, r)
 
         # 流場數值類
         f = self.gaussian_blur_flow(f)
         f = self.add_flow_noise(f)
         f = self.random_flow_occlusion(f)
 
-        return k, f
+        return k, f, r
 
     # ---------- geometric ops (skeleton-center pivot) ----------
-    def rotate(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor]):
+    def rotate(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor], rgb: Optional[torch.Tensor]):
         """
         - None-safe：
             * 兩者皆 None → 原樣返回
@@ -191,11 +188,11 @@ class Augmentation(nn.Module):
             * 只有 keypoints → 以 skeleton center 為 pivot，僅旋轉 keypoints
             * 兩者皆在 → 如常
         """
-        device = self._pick_device(keypoints, flows)
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.5:
-            return keypoints, flows
-        if keypoints is None and flows is None:
-            return None, None
+            return keypoints, flows, rgb
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
         # === 準備 B,T 與 pivot ===
         if keypoints is not None:
@@ -205,9 +202,12 @@ class Augmentation(nn.Module):
             cx = cx.expand(B, T, 1).contiguous()                # (B,T,1)
             cy = cy.expand(B, T, 1).contiguous()                # (B,T,1)
         else:
-            assert flows is not None, "at least one of keypoints/flows must be provided"
-            B, _, T, _, _ = flows.shape
+            if flows is not None:
+                B, _, T, _, _ = flows.shape
+            else:
+                B, _, T, _, _ = rgb.shape
             cx = cy = None
+            
 
         # === 抽角度（per-frame/per-clip）===
         if self.per_frame:
@@ -283,22 +283,59 @@ class Augmentation(nn.Module):
             out[:, 1] = torch.where(valid, y_rot, y)
             out[:, 2] = conf
             keypoints = out
+        
+        # === rgb 分支 ===
+        if rgb is not None:
+            assert rgb.dim() == 5, "rgb should be (B,C,T,H,W)"
+            Br, Cr, Tr, Hr, Wr = rgb.shape
+            assert B == Br and T == Tr, f"(B,T) mismatch between reference({B},{T}) and rgb({Br},{Tr})"
+            
+            if cx is None:
+                cx = torch.full((B, 1, 1), 0.5, device=device, dtype=rgb.dtype)
+                cy = torch.full((B, 1, 1), 0.5, device=device, dtype=rgb.dtype)
 
-        return keypoints, flows
+            # 用與 flows/Keypoints 相同的 pivot 與角度建 theta_r
+            cx_n_r = (cx * 2) - 1
+            cy_n_r = (cy * 2) - 1
+            cos_t3, sin_t3 = cos_t[..., None], sin_t[..., None]
+            t_x = cx_n_r * (1 - cos_t3) + cy_n_r * (sin_t3)
+            t_y = cy_n_r * (1 - cos_t3) - cx_n_r * (sin_t3)
+
+            theta_r = torch.zeros(B, T, 2, 3, device=device, dtype=rgb.dtype)
+            theta_r[..., 0, 0] =  cos_t
+            theta_r[..., 0, 1] = -sin_t
+            theta_r[..., 1, 0] =  sin_t
+            theta_r[..., 1, 1] =  cos_t
+            theta_r[..., 0, 2] =  t_x.squeeze(-1)
+            theta_r[..., 1, 2] =  t_y.squeeze(-1)
+            theta_r = theta_r.reshape(B*T, 2, 3)
+
+            rgb_bt = rgb.permute(0,2,1,3,4).contiguous().reshape(B*T, Cr, Hr, Wr)
+            grid_r = F.affine_grid(theta_r, size=(B*T, Cr, Hr, Wr), align_corners=self.align_corners)
+            rgb_img_rot = F.grid_sample(
+                rgb_bt, grid_r,
+                mode=self.resample_mode, padding_mode=self.pad_mode,
+                align_corners=self.align_corners
+            )
+            rgb = rgb_img_rot.reshape(B, T, Cr, Hr, Wr).permute(0,2,1,3,4).contiguous()
+
+        return keypoints, flows, rgb
     
 
-    def scale(self, keypoints, flows):
-        device = self._pick_device(keypoints, flows)
+    def scale(self, keypoints, flows, rgb):
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.5:
-            return keypoints, flows
-        if keypoints is None and flows is None:
-            return None, None
+            return keypoints, flows, rgb
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
         # 取 B,T
         if keypoints is not None:
             B, _, T, _ = keypoints.shape
-        else:
+        elif flows is not None:
             B, _, T, _, _ = flows.shape
+        else:
+            B, _, T, _, _ = rgb.shape
 
         # 取每幀/每段 s ∈ [scale_min, scale_max]
         s_min = float(self.scale_min)
@@ -314,7 +351,7 @@ class Augmentation(nn.Module):
             cx = cx.expand(B, T, 1).contiguous()
             cy = cy.expand(B, T, 1).contiguous()
         else:
-            dtype_img = flows.dtype
+            dtype_img = flows.dtype if flows is not None else rgb.dtype
             cx = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
             cy = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
 
@@ -371,24 +408,55 @@ class Augmentation(nn.Module):
             out[:, 1] = torch.where(valid, y_s, y)
             out[:, 2] = conf
             keypoints = out
+        
+        # --- RGB 分支：影像 warp（不縮放像素值，只做幾何） ---
+        if rgb is not None:
+            assert rgb.dim() == 5, "rgb should be (B,C,T,H,W)"
+            Br, Cr, Tr, Hr, Wr = rgb.shape
+            assert B == Br and T == Tr, "scale: (B,T) mismatch between reference and rgb"
 
-        return keypoints, flows
+            # 以同一 pivot 與 s 建立對應 RGB 的 theta/grid
+            cx_n_r = (cx * 2) - 1
+            cy_n_r = (cy * 2) - 1
+            s3_r = s[..., None]
+            tx_r = cx_n_r * (1.0 - s3_r)
+            ty_r = cy_n_r * (1.0 - s3_r)
+
+            theta_r = torch.zeros(B, T, 2, 3, device=device, dtype=rgb.dtype)
+            theta_r[..., 0, 0] = s
+            theta_r[..., 1, 1] = s
+            theta_r[..., 0, 2] = tx_r.squeeze(-1)
+            theta_r[..., 1, 2] = ty_r.squeeze(-1)
+            theta_r = theta_r.reshape(B*T, 2, 3)
+
+            rgb_bt = rgb.permute(0, 2, 1, 3, 4).contiguous().reshape(B*T, Cr, Hr, Wr)
+            grid_r = F.affine_grid(theta_r, size=(B*T, Cr, Hr, Wr), align_corners=self.align_corners)
+            rgb_img = F.grid_sample(
+                rgb_bt, grid_r,
+                mode=self.resample_mode, padding_mode=self.pad_mode,
+                align_corners=self.align_corners
+            )
+            rgb = rgb_img.reshape(B, T, Cr, Hr, Wr).permute(0, 2, 1, 3, 4).contiguous()
+
+        return keypoints, flows, rgb
 
 
-    def translate(self, keypoints, flows):
-        device = self._pick_device(keypoints, flows)
+    def translate(self, keypoints, flows, rgb):
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.5:
-            return keypoints, flows
-        device = self._pick_device(keypoints, flows)
+            return keypoints, flows, rgb
+        
         # gating removed to mirror aug_func.py (external control)
-        if keypoints is None and flows is None:
-            return None, None
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
         # 取 B,T
         if keypoints is not None:
             B, _, T, _ = keypoints.shape
-        else:
+        elif flows is not None:
             B, _, T, _, _ = flows.shape
+        else:
+            B, _, T, _, _ = rgb.shape
 
         # 取 (dx,dy) ∈ [-trans_max, +trans_max]
         tx_max = float(self.translate_x_max)
@@ -445,21 +513,49 @@ class Augmentation(nn.Module):
             out[:, 1] = torch.where(valid, y_t, y)
             out[:, 2] = conf
             keypoints = out
+        
+        if rgb is not None:
+            assert rgb.dim() == 5, "rgb should be (B,C,T,H,W)"
+            Br, Cr, Tr, Hr, Wr = rgb.shape
+            assert B == Br and T == Tr, "translate: (B,T) mismatch between reference and rgb"
+            dtype_img = rgb.dtype
 
-        return keypoints, flows
+            # grid_sample 的平移量以 [-1,1] 記，所以把 [0..1] 的 dx,dy 轉 2*dx, 2*dy
+            tnx = (dx * 2.0).unsqueeze(-1)    # (B,T,1)
+            tny = (dy * 2.0).unsqueeze(-1)
 
-    def shear(self, keypoints, flows):
-        device = self._pick_device(keypoints, flows)
+            theta_r = torch.zeros(B, T, 2, 3, device=device, dtype=dtype_img)
+            theta_r[..., 0, 0] = 1.0
+            theta_r[..., 1, 1] = 1.0
+            theta_r[..., 0, 2] = tnx.squeeze(-1)
+            theta_r[..., 1, 2] = tny.squeeze(-1)
+            theta_r = theta_r.reshape(B*T, 2, 3)
+
+            rgb_bt = rgb.permute(0, 2, 1, 3, 4).contiguous().reshape(B*T, Cr, Hr, Wr)  # (B*T,Cr,H,W)
+            grid_r = F.affine_grid(theta_r, size=(B*T, Cr, Hr, Wr), align_corners=self.align_corners)
+            rgb_img = F.grid_sample(
+                rgb_bt, grid_r,
+                mode=self.resample_mode, padding_mode=self.pad_mode,
+                align_corners=self.align_corners
+            )
+            rgb = rgb_img.reshape(B, T, Cr, Hr, Wr).permute(0, 2, 1, 3, 4).contiguous()
+
+        return keypoints, flows, rgb
+
+    def shear(self, keypoints, flows, rgb):
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.2:
-            return keypoints, flows
-        if keypoints is None and flows is None:
-            return None, None
+            return keypoints, flows, rgb
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
-        # 取 B,T
+        # 取 T 與 B
         if keypoints is not None:
             B, _, T, _ = keypoints.shape
-        else:
+        elif flows is not None:
             B, _, T, _, _ = flows.shape
+        else:
+            B, _, T, _, _ = rgb.shape
 
         shx_max = float(self.shear_x_max)
         shy_max = float(self.shear_y_max)
@@ -476,7 +572,7 @@ class Augmentation(nn.Module):
             cx = cx.expand(B, T, 1).contiguous()
             cy = cy.expand(B, T, 1).contiguous()
         else:
-            dtype_img = flows.dtype
+            dtype_img = flows.dtype if flows is not None else rgb.dtype
             cx = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
             cy = torch.full((B, 1, 1), 0.5, device=device, dtype=dtype_img)
 
@@ -539,19 +635,53 @@ class Augmentation(nn.Module):
             out[:, 1] = torch.where(valid, y_s, y)
             out[:, 2] = conf
             keypoints = out
+        
+        if rgb is not None:
+            assert rgb.dim() == 5, "rgb should be (B,C,T,H,W)"
+            Br, Cr, Tr, Hr, Wr = rgb.shape
+            assert B == Br and T == Tr, "shear: (B,T) mismatch between reference and rgb"
 
-        return keypoints, flows
+            # 若前面沒由 kpts/flows 設 pivot，這裡用影像中心
+            if cx is None:
+                cx = torch.full((B, 1, 1), 0.5, device=device, dtype=rgb.dtype)
+                cy = torch.full((B, 1, 1), 0.5, device=device, dtype=rgb.dtype)
 
+            # 轉到 [-1,1]，A = [[1, shx],[shy, 1]]；t = (I - A)p = [-shx*cy, -shy*cx]
+            cx_n = (cx * 2) - 1
+            cy_n = (cy * 2) - 1
+            shx3 = shx[..., None]
+            shy3 = shy[..., None]
+            tx = -shx3 * cy_n
+            ty = -shy3 * cx_n
 
+            theta_r = torch.zeros(B, T, 2, 3, device=device, dtype=rgb.dtype)
+            theta_r[..., 0, 0] = 1.0
+            theta_r[..., 0, 1] = shx
+            theta_r[..., 1, 0] = shy
+            theta_r[..., 1, 1] = 1.0
+            theta_r[..., 0, 2] = tx.squeeze(-1)
+            theta_r[..., 1, 2] = ty.squeeze(-1)
+            theta_r = theta_r.reshape(B*T, 2, 3)
 
-    def hflip(self, keypoints, flows):
-        device = self._pick_device(keypoints, flows)
+            rgb_bt = rgb.permute(0, 2, 1, 3, 4).contiguous().reshape(B*T, Cr, Hr, Wr)
+            grid_r = F.affine_grid(theta_r, size=(B*T, Cr, Hr, Wr), align_corners=self.align_corners)
+            rgb_img = F.grid_sample(
+                rgb_bt, grid_r,
+                mode=self.resample_mode, padding_mode=self.pad_mode,
+                align_corners=self.align_corners
+            )
+            rgb = rgb_img.reshape(B, T, Cr, Hr, Wr).permute(0, 2, 1, 3, 4).contiguous()
+
+        return keypoints, flows, rgb
+
+    def hflip(self, keypoints, flows, rgb):
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.5:
-            return keypoints, flows
-        device = self._pick_device(keypoints, flows)
+            return keypoints, flows, rgb
+        
         # gating removed to mirror aug_func.py (external control)
-        if keypoints is None and flows is None:
-            return None, None
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
         # flows：影像左右翻；u 取負
         if flows is not None:
@@ -566,26 +696,31 @@ class Augmentation(nn.Module):
             if self.clamp_xy:
                 out[:, 0] = out[:, 0].clamp(0, 1)
             keypoints = out
+        
+        # rgb
+        if rgb is not None:
+            rgb = torch.flip(rgb, dims=[-1])
 
-        return keypoints, flows
-
-
+        return keypoints, flows, rgb
 
     # ---------- temporal ops ----------
-    def temporal_jitter(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor]):
-        device = self._pick_device(keypoints, flows)
+    def temporal_jitter(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor], rgb: Optional[torch.Tensor]):
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.3:
-            return keypoints, flows
-        if keypoints is None and flows is None:
-            return None, None
+            return keypoints, flows, rgb
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
-        # 取 T 與 B
+        # Take T and B
         if keypoints is not None:
             B, _, T, V = keypoints.shape
-        else:
+        elif flows is not None:
             B, _, T, H, W = flows.shape
+        else:
+            B, _, T, H, W = rgb.shape
+            
         if T <= 2 or self.p_temporal_jitter <= 0:
-            return keypoints, flows
+            return keypoints, flows, rgb
 
         base = torch.arange(T, device=device, dtype=torch.long)
         final_idx_all = []
@@ -630,24 +765,30 @@ class Augmentation(nn.Module):
             _, Cf, _, H, W = flows.shape
             f_idx = final_idx[:, None, :, None, None].expand(B, Cf, T, H, W)
             flows = torch.gather(flows, dim=2, index=f_idx).contiguous()
+        if rgb is not None:
+            _, Cr, _, Hr, Wr = rgb.shape
+            r_idx = final_idx[:, None, :, None, None].expand(B, Cr, T, Hr, Wr)
+            rgb = torch.gather(rgb, dim=2, index=r_idx).contiguous()
 
-        return keypoints, flows
+        return keypoints, flows, rgb
 
-
-    def frame_drop(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor]):
-        device = self._pick_device(keypoints, flows)
+    def frame_drop(self, keypoints: Optional[torch.Tensor], flows: Optional[torch.Tensor], rgb:Optional[torch.Tensor]):
+        device = self._pick_device(keypoints, flows, rgb)
         if torch.rand((), device=device) >= 0.3:
-            return keypoints, flows
-        if keypoints is None and flows is None:
-            return None, None
+            return keypoints, flows, rgb
+        if keypoints is None and flows is None and rgb is None:
+            return None, None, None
 
         # 取 T 與 B
         if keypoints is not None:
             B, _, T, _ = keypoints.shape
-        else:
+        elif flows is not None:
             B, _, T, _, _ = flows.shape
+        else:
+            B, _, T, _, _ = rgb.shape
+        
         if T <= 1 or self.frame_drop_ratio <= 0:
-            return keypoints, flows
+            return keypoints, flows, rgb
 
         # 每個樣本各自抽 p ~ Uniform(0.01, frame_drop_ratio)，num_drop = int(T*p)，允許為 0
         low = 0.01
@@ -663,6 +804,8 @@ class Augmentation(nn.Module):
             keypoints = keypoints.clone()
         if flows is not None:
             flows = flows.clone()
+        if rgb is not None:
+            rgb = rgb.clone()
 
         for b in range(B):
             k = num_drop_per_b[b]
@@ -673,7 +816,9 @@ class Augmentation(nn.Module):
                 keypoints[b, :, idx, :] = 0
             if flows is not None:
                 flows[b, :, idx, :, :] = 0
-        return keypoints, flows
+            if rgb is not None:
+                rgb[b, :, idx, :, :] = 0
+        return keypoints, flows, rgb
 
     # ---------- flow numeric ops ----------
     def add_flow_noise(self, flows: torch.Tensor) -> torch.Tensor:

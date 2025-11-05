@@ -80,6 +80,8 @@ def crop_and_save_video(input_path: str,
     fps = cap.get(cv2.CAP_PROP_FPS)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     writer = cv2.VideoWriter(output_path, fourcc, fps, resize_scale)
+    
+    frames_buffer = []
 
     prev_bbox = None
     frame_idx = 0
@@ -136,10 +138,18 @@ def crop_and_save_video(input_path: str,
             )
 
         writer.write(resized)
+        frames_buffer.append(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
         frame_idx += 1
 
     cap.release()
     writer.release()
+    
+    video_np = np.stack(frames_buffer, axis=0)       # (T, H, W, 3)
+    video_np = np.transpose(video_np, (0, 3, 1, 2))
+    video_np = np.expand_dims(video_np, axis=1) # → (T, 1, 3, H, W)
+    video_np = video_np.astype(np.float32) / 255.0
+    
+    return video_np
 
 def process_single_video(input_path, id_, data_args, comparison_args, of_args,
                          pe_model, optical_model, logger,
@@ -235,7 +245,7 @@ def process_single_video(input_path, id_, data_args, comparison_args, of_args,
 
     # --- 裁切 + 光流 ---
     tmp_file_path = f"temp_{time_}.mp4"
-    crop_and_save_video(
+    rgb_np = crop_and_save_video(
         input_path=input_path,
         bbox_annotation=bbox_annotation,
         output_path=tmp_file_path,
@@ -252,9 +262,15 @@ def process_single_video(input_path, id_, data_args, comparison_args, of_args,
 
     keypoints_arr = np.array(bbox_pe_annotation)
     output_path = os.path.join(np_save_dir, f"{id_:04d}.npz")
-    np.savez_compressed(output_path,
-                        keypoints=keypoints_arr,
-                        optical_flows=flows_f32)
+    if not data_args.rgb_include:
+        np.savez_compressed(output_path,
+                            keypoints=keypoints_arr,
+                            optical_flows=flows_f32)
+    else:
+        np.savez_compressed(output_path,
+                            rgbs=rgb_np,
+                            keypoints=keypoints_arr,
+                            optical_flows=flows_f32)
 
     exec_fps_pe = result_pe["stat"]["exec_fps"]
     keypoint_detection_rate = result_pe["stat"]["keypoint_detection_rate"]
@@ -346,7 +362,7 @@ def main():
                 alt_path = os.path.join(seg_dir, os.path.basename(input_path))
                 try:
                     annotation, exec_fps_pe, det_rate, exec_fps_of = process_single_video(
-                        alt_path, id_, data_args, comparison_args,
+                        alt_path, id_, data_args, comparison_args, of_args,
                         pe_model, optical_model, logger,
                         video_df=video_df if comparison_args.for_comparison else None,
                         plot_output_dir=plot_output_dir if data_args.plot_pe else None,

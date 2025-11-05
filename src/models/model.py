@@ -24,9 +24,10 @@ class ActionRecognitionModel(nn.Module):
         super(ActionRecognitionModel, self).__init__()
         assert sum([model_params.is_local_flow_stream, model_params.is_frame_diff_stream, model_params.is_I3D_stream]) < 2,\
             "Train one stream at one time"
-        self.is_I3D_stream = model_params.is_I3D_stream
         self.final_feature_dim = 0
+        self.is_I3D_stream = model_params.is_I3D_stream
         self.is_i3dgcn_stream = model_params.is_i3dgcn_stream
+        self.I3D_mode = model_params.I3D_mode 
         
         # augmentation
         self.aug_module = Augmentation(augment_params=aug_params)
@@ -34,13 +35,22 @@ class ActionRecognitionModel(nn.Module):
         # initiate I3D model
         if self.is_I3D_stream: 
             print("use i3d model")
-            self.I3D = InceptionI3d(in_channels=2, num_classes=data_params.num_classes)
+            
+            # load the corresponding weight
+            if self.I3D_mode == "flow":
+                i3d_in_channels = 2
+                pretrained_file_name = "flow_imagenet.pt"
+            elif self.I3D_mode == "rgb":
+                i3d_in_channels = 3
+                pretrained_file_name = "rgb_imagenet.pt"
+            
+            self.I3D = InceptionI3d(in_channels=i3d_in_channels, num_classes=data_params.num_classes)
             
             # load weight 
             if model_params.load_i3d_weights:
                 i3d_weights_path = os.path.join(model_params.pretrained_weights_root_dir_name,
                                                     model_params.I3D_weights_dir_name,
-                                                    model_params.I3D_weights_file_name)
+                                                    pretrained_file_name)
                 i3d_state = torch.load(i3d_weights_path)
                 filtered = {}
                 for k, v in i3d_state.items():
@@ -90,14 +100,17 @@ class ActionRecognitionModel(nn.Module):
         # final classifier
         self.final_classifier = nn.Linear(self.final_feature_dim, data_params.num_classes)
     
-    def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
+    def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None, rgb: torch.Tensor = None):
         
         # conduct augmentation
-        skeleton, flow = self.aug_module(skeleton, flow)
+        skeleton, flow, rgb = self.aug_module(skeleton, flow, rgb)
         
         cos_loss = None        
         if self.is_I3D_stream: # I3D stream
-            I3D_feat, _ = self.I3D(flow)
+            if self.I3D_mode == "flow":
+                I3D_feat, _ = self.I3D(flow)
+            else: # rgb
+                I3D_feat, _ = self.I3D(rgb)
             feat = self.flow_feature_projector(I3D_feat)
         elif self.is_i3dgcn_stream: # i3dgcn stream
             trial_feat, _, cos_loss = self.i3dgcn_model(skeleton, flow)
@@ -120,7 +133,7 @@ class ContrastiveActionWrapper(nn.Module):
     def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None, labels=None):
         feat_from_backbone, main_logits = self.backbone(skeleton, flow=flow, labels=labels)
     '''
-    def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None):
-        feat_from_backbone, main_logits, cos_loss = self.backbone(skeleton, flow=flow)
+    def forward(self, skeleton: torch.Tensor, flow: torch.Tensor = None, rgb: torch.Tensor = None):
+        feat_from_backbone, main_logits, cos_loss = self.backbone(skeleton, flow=flow, rgb=rgb)
         emb = F.normalize(self.proj_head(feat_from_backbone), dim=1)
         return emb, main_logits, cos_loss

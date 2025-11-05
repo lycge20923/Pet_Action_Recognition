@@ -11,7 +11,6 @@ from tqdm import tqdm
 import gc
 
 from ..utils.cli_args import DataArguments, AugmentationArguments
-from .aug_func import *
 
 class KpOfDataset(Dataset):
     def __init__(self,
@@ -19,6 +18,7 @@ class KpOfDataset(Dataset):
                  aug_params: AugmentationArguments,
                  load_kps: bool = True,
                  load_flows: bool = False,
+                 load_rgbs: bool = False,
                  istrain: bool = True,
                  fold_num: int = 0,
                  data_seg_num: int = 6,
@@ -31,6 +31,7 @@ class KpOfDataset(Dataset):
         
         self.load_flows = load_flows
         self.load_kps = load_kps
+        self.load_rgbs = load_rgbs
 
         self.datatype = "train" if istrain else "val"
         # Adjust trainsplit_dir_name if it's not in your data_params
@@ -63,12 +64,21 @@ class KpOfDataset(Dataset):
             if self.load_kps:
                 keypoints_np = np.load(annotation["kp_feature_file"]).astype(np.float32, copy=False)
                 sample["keypoints_np"] = keypoints_np
+            
+            if self.load_rgbs:
+                rgbs_np = np.load(annotation["rgb_feature_file"])
+                rgbs_np = rgbs_np.squeeze(axis=1) # T, 2, H, W
+                rgbs_np = rgbs_np.transpose(1, 0, 2, 3) # 2, T, H, W
+                sample["rgbs_np"] = rgbs_np
+                
             sample["video_name"] = annotation["video_name"]
             getattr(self, f"dataset_{str(idx % data_seg_num)}").append(sample)
         if self.load_flows:
             del optical_flows_np
         if self.load_kps:
             del keypoints_np 
+        if self.load_rgbs:
+            del rgbs_np
         gc.collect()    
     
     def __len__(self):
@@ -86,6 +96,7 @@ class KpOfDataset(Dataset):
         
         optical_flows_np = sample["optical_flows_np"] if self.load_flows else None
         keypoints_np = sample["keypoints_np"] if self.load_kps else None
+        rgbs_np = sample["rgbs_np"] if self.load_rgbs else None
         
         # --- transform to tensor --- 
         if keypoints_np is not None:
@@ -98,8 +109,12 @@ class KpOfDataset(Dataset):
             optical_flows_tensor = torch.from_numpy(optical_flows_np).float()
         else:
             optical_flows_tensor = None
+        if rgbs_np is not None:
+            rgbs_tensor = torch.from_numpy(rgbs_np).float()
+        else:
+            rgbs_tensor = None
 
-        return keypoints_tensor, optical_flows_tensor, label, video_name
+        return keypoints_tensor, optical_flows_tensor, rgbs_tensor, label, video_name
 
 class SiameseKpOfDataset(Dataset):
     """
@@ -122,7 +137,7 @@ class SiameseKpOfDataset(Dataset):
         return len(self.base)
 
     def __getitem__(self, index):
-        kp1, flow1, lab1, _ = self.base[index]
+        kp1, flow1, rgb1, lab1, _ = self.base[index]
         lab1_int = int(lab1.item())
 
         # obtain another sample
@@ -134,7 +149,7 @@ class SiameseKpOfDataset(Dataset):
             idx2 = random.choice(self.label_to_indices[neg_label])
             y = 1.0
 
-        kp2, flow2, lab2, _ = self.base[idx2]
+        kp2, flow2, rgb2, lab2, _ = self.base[idx2]
         y = torch.tensor(y, dtype=torch.float32)
         
-        return (kp1, kp2), (flow1, flow2), (lab1, lab2), y
+        return (kp1, kp2), (flow1, flow2), (rgb1, rgb2), (lab1, lab2), y

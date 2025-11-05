@@ -2,8 +2,6 @@ import os
 import json
 import logging
 import numpy as np
-import random
-import gc
 from tqdm import tqdm
 from collections import defaultdict, Counter
 import math
@@ -98,7 +96,7 @@ def assign_sources_to_folds_balanced(sources, src2vec, total, K=5, seed=42, cove
 
     return assign
 
-def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir, for_comparison):
+def generate_and_save_windows_once(annotations, window_size, num_samples, np_save_dir, for_comparison, add_rgb=False, segment_dir=None):
     """
     For each clip annotation, slice into windows, sample frames,
     save each window's features once, and return a flat list of metadata.
@@ -116,6 +114,13 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
         
         kp_buf = np.empty((num_samples, *kps.shape[1:]), dtype=kps.dtype)
         of_buf = np.empty((num_samples, *ofs.shape[1:]), dtype=ofs.dtype)
+        
+        # add rgb for ablation study
+        ref_rgb = add_rgb and segment_dir is not None
+        if ref_rgb:
+            rgbs = data["rgbs"]
+            rgb_buf = np.empty((num_samples, *rgbs.shape[1:]), dtype=rgbs.dtype)  # [num_samples, H, W, 3]
+            
 
         for w in range(n_windows):
             if for_comparison:
@@ -152,6 +157,12 @@ def generate_and_save_windows_once(annotations, window_size, num_samples, np_sav
                 "action_id":        ann["action_id"],
                 "window_index":     w
             }
+            if ref_rgb:
+                np.take(rgbs, idxs, axis=0, out=rgb_buf)
+                rgb_feat_path = os.path.join(np_save_dir, f"{sample_id:06d}_rgb.npy")
+                np.save(rgb_feat_path, rgb_buf)
+                store_dict["rgb_feature_file"] = rgb_feat_path
+                
             if "split" in ann.keys(): # for comparison other 
                 store_dict["fold"] = 0 if ann["split"] == "val" else 1
                 
@@ -180,6 +191,8 @@ def main():
         data_args = set_comparison_config(data_args, comparison_args.dataset_name)
     
     base = os.path.splitext(data_args.annotation_file_name)[0]
+    
+    
     out_dir = os.path.join(data_args.data_dir, data_args.trainsplit_dir_name)
     np_save_dir = os.path.join(out_dir, "npy")
     os.makedirs(np_save_dir, exist_ok=True)
@@ -205,7 +218,9 @@ def main():
         window_size=data_args.window_size,
         num_samples=data_args.num_samples,
         np_save_dir=np_save_dir,
-        for_comparison=comparison_args.for_comparison
+        for_comparison=comparison_args.for_comparison,
+        add_rgb=data_args.rgb_include,
+        segment_dir=os.path.join(data_args.data_dir, data_args.seg_dir_name)
     )
     # for temp test
     # with open(os.path.join(out_dir, f"temp_windows_metadata.json"), 'r') as f:

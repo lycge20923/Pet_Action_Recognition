@@ -208,7 +208,7 @@ def predict():
             total_logits = 0
             for model in models:
                 model.eval()
-                _, logits, _ = model(kps, fl)
+                _, logits, _ = model(kps, fl, _)
                 total_logits += logits
             
             prob = F.softmax(total_logits, dim=1)[0]

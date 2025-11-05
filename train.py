@@ -78,11 +78,13 @@ def prepare_dataloaders(data_params:DataArguments,
                         aug_params_eval:AugmentationArguments, 
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
-   
+    
     load_kps = (not model_params.is_I3D_stream) or model_params.is_i3dgcn_stream
-    load_flows = model_params.is_local_flow_stream or model_params.is_I3D_stream or model_params.is_i3dgcn_stream
-    val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
-    train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
+    load_flows = model_params.is_local_flow_stream or (model_params.is_I3D_stream and model_params.I3D_mode == "flow") or model_params.is_i3dgcn_stream
+    load_rgbs = model_params.is_I3D_stream and model_params.I3D_mode == "rgb"
+    
+    val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, load_rgbs=load_rgbs, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
+    train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, load_rgbs=load_rgbs, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)
     
     # calculate the dataset size
     train_size = len(train_dataset)
@@ -222,13 +224,14 @@ def train_one_epoch(model,
         batch_loss_total = None
         
         if train_params.add_contrastive_loss and contrastive_loss: 
-            (kp1, kp2), (flow1, flow2), (lab1, lab2), y = batch_data
+            (kp1, kp2), (flow1, flow2), (rgb1, rgb2), (lab1, lab2), y = batch_data
             kp1, kp2 = kp1.to(device) if kp1 is not None else None, kp2.to(device) if kp2 is not None else None
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
+            rgb1, rgb2 = rgb1.to(device) if rgb1 is not None else None, rgb2.to(device) if rgb2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
             y = y.to(device)            
-            emb1, logit1, cos_loss_1 = model(kp1, flow1)
-            emb2, logit2, cos_loss_2 = model(kp2 ,flow2)
+            emb1, logit1, cos_loss_1 = model(kp1, flow1, rgb1)
+            emb2, logit2, cos_loss_2 = model(kp2 ,flow2, rgb2)
             
             # calculate loss
             loss_ce_part1 = cross_entropy_loss(logit1, lab1)
@@ -254,11 +257,13 @@ def train_one_epoch(model,
             correct += (pred1 == lab1).sum().item()
             correct += (pred2 == lab2).sum().item()
         else: 
-            kps, flow, label, _ = batch_data
-            kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
+            kps, flow, rgb, label, _ = batch_data
+            kps = kps.to(device) if kps is not None else None
+            flow = flow.to(device) if flow is not None else None
+            rgb = rgb.to(device) if rgb is not None else None
             label = label.to(device)
             
-            _, output, cos_loss = model(kps, flow)
+            _, output, cos_loss = model(kps, flow, rgb)
 
             batch_loss_ce = cross_entropy_loss(output, label)
             batch_loss_total = batch_loss_ce
@@ -303,15 +308,17 @@ def val_one_epoch(model,
     all_details = defaultdict(lambda: {"preds": [], "ground-trues": []})
     
     with torch.no_grad():
-        for kps, flow, label, video_name in loader:
+        for kps, flow, rgb, label, video_name in loader:
             
-            kps, flow = kps.to(device) if kps is not None else None, flow.to(device) if flow is not None else None
+            kps = kps.to(device) if kps is not None else None
+            flow = flow.to(device) if flow is not None else None
+            rgb = rgb.to(device) if rgb is not None else None
             label = label.to(device)
             
             if train_params.add_contrastive_loss:
-                _, output, cos_loss = model.backbone(kps, flow)
+                _, output, cos_loss = model.backbone(kps, flow, rgb)
             else:
-                _, output, cos_loss = model(kps, flow)
+                _, output, cos_loss = model(kps, flow, rgb)
 
             loss = cross_entropy_loss(output, label)
             if train_params.add_similarity_loss and cos_loss is not None:
@@ -325,7 +332,7 @@ def val_one_epoch(model,
             if ref_models is not None:
                 for model_ in ref_models:
                     model_.eval()
-                    _, logits, _ = model_(kps, flow)
+                    _, logits, _ = model_(kps, flow, rgb)
                     output += logits
                 
             _, predict = torch.max(output.data, 1)
