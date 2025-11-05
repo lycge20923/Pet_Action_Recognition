@@ -127,7 +127,10 @@ def main():
         save_subdir = []
         if args.joints_stream:
             if args.joints_gcn_name == "degcn":
-                save_subdir.append("joints")
+                if not args.complete_blocks:
+                    save_subdir.append("joints")
+                else:
+                    save_subdir.append(os.path.join("supplement", "joints_complete"))
             else:
                 if not args.complete_blocks:
                     save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}"))
@@ -144,13 +147,15 @@ def main():
         if args.local_flow_stream:
             if int(args.local_flow_block) == 5:
                 save_subdir.append("local_flow")
+            elif args.complete_blocks:
+                save_subdir.append(os.path.join("supplement", "local_flow_complete"))
             else:
                 save_subdir.append(os.path.join("supplement", f"local_flow_{str(args.local_flow_block)}"))
             
         if args.i3dgcn_stream:
             save_subdir.append("i3dgcn")
         if args.I3D_stream:
-            save_subdir.append("I3D")
+            save_subdir.append(os.path.join("supplement", "I3D"))
         
         all_models = []
         for fold_id in fold_ids:

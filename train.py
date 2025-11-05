@@ -41,7 +41,7 @@ def setup_experiments():
     # saving dir
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
-    saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_root_dir_name, timestamp)
+    saving_dir = os.path.join(os.path.dirname(__file__), train_params.save_root_dir_name, f"{exec_name}_{timestamp}")
     
     # save parameters
     complete_config_to_save = {
