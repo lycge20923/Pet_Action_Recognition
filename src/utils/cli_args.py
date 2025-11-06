@@ -238,11 +238,6 @@ class ModelArguments:
         default="coords_stgcn.npy",
         metadata={"help":"ST-GCN needs one center coordinate, thus it could be accessed in the file"}
     )
-    # I3D related parameters
-    is_I3D_stream: bool = field(
-        default=False,
-        metadata={"help":"I3D stream for training and prediction"}
-    ) 
     is_local_flow_stream: bool = field(
         default=False,
         metadata={"help":"flow stream for training and prediction"}
@@ -258,6 +253,11 @@ class ModelArguments:
     is_i3dgcn_stream: bool = field(
         default=False,
         metadata={"help":"The stream for the i3dgcn stream, which contain joints and flows"}
+    )
+    # I3D related parameters
+    is_I3D_stream: bool = field(
+        default=False,
+        metadata={"help":"I3D stream for training and prediction"}
     )
     load_i3d_weights: bool = field(
         default=True,
@@ -277,7 +277,19 @@ class ModelArguments:
     )
     I3D_project_dim: int = field(
         default=256,
-        metadata={"help":"Project to have the similar size with ST-GCN"}
+        metadata={"help":"Project to have the similar size"}
+    )
+    is_X3D_stream: bool = field(
+        default=False,
+        metadata={"help":"X3D stream for training and prediction"}
+    )
+    load_x3d_m_weights: bool = field(
+        default=True,
+        metadata={"help":"For comparison, whether loading i3d weights"}
+    )
+    X3D_project_dim: int = field(
+        default=256,
+        metadata={"help":"Project to have the similar size"}
     )
     
     

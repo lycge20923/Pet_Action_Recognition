@@ -17,3 +17,5 @@ dropbox
 kagglehub
 datasets
 natsort
+fvcore
+pytorchvideo

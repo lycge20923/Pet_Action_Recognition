@@ -79,9 +79,9 @@ def prepare_dataloaders(data_params:DataArguments,
                         model_params:ModelArguments, 
                         train_params:TrainingArguments):
     
-    load_kps = (not model_params.is_I3D_stream) or model_params.is_i3dgcn_stream
+    load_kps = ((not model_params.is_I3D_stream) and (not model_params.is_X3D_stream)) or model_params.is_i3dgcn_stream
     load_flows = model_params.is_local_flow_stream or (model_params.is_I3D_stream and model_params.I3D_mode == "flow") or model_params.is_i3dgcn_stream
-    load_rgbs = model_params.is_I3D_stream and model_params.I3D_mode == "rgb"
+    load_rgbs = (model_params.is_I3D_stream and model_params.I3D_mode == "rgb") or (model_params.is_X3D_stream)
     
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, load_rgbs=load_rgbs, istrain=False, fold_num=data_params.fold_num, for_test=train_params.for_test)
     train_dataset = KpOfDataset(data_params, aug_params_train, load_flows=load_flows, load_kps=load_kps, load_rgbs=load_rgbs, istrain=True, fold_num=data_params.fold_num, for_test=train_params.for_test)

@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--diff_stream", action="store_true", help="Use diff stream")
     parser.add_argument('--i3dgcn_stream', action="store_true", help="Use I3D_GCN stream")
     parser.add_argument("--I3D_stream", action="store_true", help="Use I3D stream")
+    parser.add_argument("--X3D_stream", action="store_true", help="Use X3D stream")
     parser.add_argument("--joints_gcn_name", default="degcn", choices=["ctrgcn", "infogcn", "stgcn", "tdgcn", "degcn"], help="(ablation study) choose different gcn name if needed")
     parser.add_argument("--complete_blocks", action="store_true", help="Use complete blocks")
     parser.add_argument("--local_flow_block", default=5, type=int, help="For ablation study to test the local flow block")
@@ -39,6 +40,7 @@ def parse_args():
     parser.add_argument("--diff_stream_checkpoint_dir", default=None, help="Skeleton model(diff) checkpoint dir")
     parser.add_argument('--i3dgcn_stream_checkpoint_dir', default=None, help="I3D_GCN checkpoint dir")
     parser.add_argument('--I3D_checkpoint_dir', default=None, help="I3D model checkpoint_dir")
+    parser.add_argument('--X3D_checkpoint_dir', default=None, help="X3D model checkpoint_dir")
     
     # for rgb/flow
     parser.add_argument("--rgb", action="store_true", help="Use rgb data")
@@ -202,9 +204,9 @@ def main():
         
         # load data loader
         if args.five_fold_val:
-            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.i3dgcn_stream, args.I3D_stream, fold_id, data_params, args.rgb)
+            val_loader = set_dataloaders(args.joints_stream, args.local_flow_stream, args.diff_stream, args.i3dgcn_stream, args.I3D_stream, fold_id, data_params, args.rgb or args.X3D_stream)
         else:
-            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id, data_params, args.rgb)
+            val_loader = set_dataloaders(args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir, args.I3D_checkpoint_dir, fold_id, data_params, args.rgb or args.X3D_checkpoint_dir)
         
         count_samples += len(val_loader.dataset)
         with torch.no_grad():

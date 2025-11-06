@@ -23,7 +23,7 @@ class KpOfDataset(Dataset):
                  fold_num: int = 0,
                  data_seg_num: int = 6,
                  for_test = False,
-                 test_len = 32
+                 test_len = 31
                  ):
         super().__init__()
         self.data_params = data_params

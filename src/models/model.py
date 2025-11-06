@@ -11,6 +11,7 @@ from .ctrgcn import CTR_GCN
 from .infogcn import Info_GCN
 from .i3dgcn import I3D_GCN
 from .I3D import InceptionI3d
+from .x3d import x3d
 from ..utils.cli_args import ModelArguments, DataArguments, AugmentationArguments
 
 from .augment import Augmentation
@@ -28,6 +29,7 @@ class ActionRecognitionModel(nn.Module):
         self.is_I3D_stream = model_params.is_I3D_stream
         self.is_i3dgcn_stream = model_params.is_i3dgcn_stream
         self.I3D_mode = model_params.I3D_mode 
+        self.is_X3D_stream = model_params.is_X3D_stream
         
         # augmentation
         self.aug_module = Augmentation(augment_params=aug_params)
@@ -66,6 +68,15 @@ class ActionRecognitionModel(nn.Module):
             self._projected_flow_feat_dim = model_params.I3D_project_dim
             self.flow_feature_projector = nn.Linear(model_params.I3D_raw_feat_dim, self._projected_flow_feat_dim)
             self.final_feature_dim = self._projected_flow_feat_dim
+        
+        # initiate X3D
+        elif self.is_X3D_stream:
+            print("Use X3D model")
+            self.X3D = x3d(load_pretrained=model_params.load_x3d_m_weights, classes=data_params.num_classes)
+            self._projected_flow_feat_dim = model_params.X3D_project_dim
+            self.flow_feature_projector = nn.Linear(self.X3D.feat_dim, self._projected_flow_feat_dim)
+            self.final_feature_dim = self._projected_flow_feat_dim
+            
         elif self.is_i3dgcn_stream:
             print("Use I3D_GCN model")
             num_nodes, neighbor_base, num_classes = data_params.num_nodes, data_params.neighbor_base, data_params.num_classes
@@ -112,6 +123,9 @@ class ActionRecognitionModel(nn.Module):
             else: # rgb
                 I3D_feat, _ = self.I3D(rgb)
             feat = self.flow_feature_projector(I3D_feat)
+        elif self.is_X3D_stream:
+            X3D_feat, _ = self.X3D(rgb)
+            feat = self.flow_feature_projector(X3D_feat)
         elif self.is_i3dgcn_stream: # i3dgcn stream
             trial_feat, _, cos_loss = self.i3dgcn_model(skeleton, flow)
             feat = trial_feat
