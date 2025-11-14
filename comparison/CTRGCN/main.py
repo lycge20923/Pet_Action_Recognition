@@ -262,7 +262,6 @@ class Processor():
         
         # for patient epochs
         self.patient_epochs = 0
-        print("shuifhouhff", self.patient_epochs)
 
     def load_data(self):
         Feeder = import_class(self.arg.feeder)
@@ -519,9 +518,7 @@ class Processor():
                 writer = csv.writer(f)
                 writer.writerow(each_acc)
                 writer.writerows(confusion)
-            
-            if self.patient_epochs >= self.arg.patient_epochs:
-                break
+
 
     def start(self):
         if self.arg.phase == 'train':
@@ -537,6 +534,8 @@ class Processor():
                 self.train(epoch, save_model=save_model)
 
                 self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
+                if self.patient_epochs >= self.arg.patient_epochs:
+                    break
 
             # test the best model
             weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
