@@ -477,3 +477,10 @@ class TrainingArguments:
         default=False, 
         metadata={"help":"Whether this is for testing, not formal process of training"}
     )
+
+@dataclass
+class ComparisonArguments:
+    new_data_dir_name: str = field(
+        default="comp_data", 
+        metadata={"help":"The name of new data directory for comparison"}
+    )

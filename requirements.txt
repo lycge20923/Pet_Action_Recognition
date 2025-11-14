@@ -19,3 +19,4 @@ datasets
 natsort
 fvcore
 pytorchvideo
+torchlight
