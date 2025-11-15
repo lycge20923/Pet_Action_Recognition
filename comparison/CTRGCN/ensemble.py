@@ -25,10 +25,17 @@ if __name__ == "__main__":
     parser.add_argument('--joint-motion-dir', default=None)
     parser.add_argument('--bone-motion-dir', default=None)
     parser.add_argument("--fold_num", type=int, default=0)
+    parser.add_argument("--KABR", action="store_true", help="Use KABR dataset")
 
     arg = parser.parse_args()
-    data_dir = os.path.join(DataArguments().data_dir, ComparisonArguments().new_data_dir_name)
-    npz_file_path = os.path.join(data_dir, f"data_fold_{arg.fold_num}.npz")
+    comp_args = ComparisonArguments()
+    if not arg.KABR:
+        data_dir = os.path.join(DataArguments().data_dir, comp_args.new_data_dir_name)
+    else:
+        assert arg.fold_num == 0
+        data_dir = os.path.join(comp_args.other_data_dir_name, comp_args.new_data_dir_name)
+    
+    npz_file_path = os.path.join(data_dir, f"data_joint_fold_{arg.fold_num}.npz")
     npz_data = np.load(npz_file_path)
     label = np.where(npz_data['y_test'] > 0)[1]
     

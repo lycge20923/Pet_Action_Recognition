@@ -484,3 +484,6 @@ class ComparisonArguments:
         default="comp_data", 
         metadata={"help":"The name of new data directory for comparison"}
     )
+    other_data_dir_name: str = field(
+        default="data/others/KABR",
+    )
