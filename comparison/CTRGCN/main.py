@@ -483,6 +483,9 @@ class Processor():
             if 'ucla' in self.arg.feeder:
                 self.data_loader[ln].dataset.sample_name = np.arange(len(score))
             accuracy = self.data_loader[ln].dataset.top_k(score, 1)
+            
+            score_dict = dict(
+                zip(self.data_loader[ln].dataset.sample_name, score))
             if accuracy > self.best_acc:
                 self.patient_epochs = 0
                 self.best_acc = accuracy
@@ -491,6 +494,10 @@ class Processor():
                 state_dict = self.model.state_dict()
                 weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
                 torch.save(weights, self.best_model_path)
+                
+                if save_score:
+                    with open('{}/best_{}_score.pkl'.format(self.arg.work_dir, ln), 'wb') as f:
+                        pickle.dump(score_dict, f)
             else:
                 self.patient_epochs += 1
 
@@ -499,18 +506,17 @@ class Processor():
                 self.val_writer.add_scalar('loss', loss, self.global_step)
                 self.val_writer.add_scalar('acc', accuracy, self.global_step)
 
-            score_dict = dict(
-                zip(self.data_loader[ln].dataset.sample_name, score))
+            
             self.print_log('\tMean {} loss of {} batches: {}.'.format(
                 ln, len(self.data_loader[ln]), np.mean(loss_value)))
             for k in self.arg.show_topk:
                 self.print_log('\tTop{}: {:.2f}%'.format(
                     k, 100 * self.data_loader[ln].dataset.top_k(score, k)))
 
-            if save_score:
-                with open('{}/epoch{}_{}_score.pkl'.format(
-                        self.arg.work_dir, epoch + 1, ln), 'wb') as f:
-                    pickle.dump(score_dict, f)
+            # if save_score:
+            #     with open('{}/epoch{}_{}_score.pkl'.format(
+            #             self.arg.work_dir, epoch + 1, ln), 'wb') as f:
+            #         pickle.dump(score_dict, f)
 
             # acc for each class:
             label_list = np.concatenate(label_list)
