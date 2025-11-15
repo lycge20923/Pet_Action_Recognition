@@ -262,6 +262,7 @@ class Processor():
         
         # for patient epochs
         self.patient_epochs = 0
+        self.best_model_path = os.path.join(self.arg.work_dir, 'best_model.pt')
 
     def load_data(self):
         Feeder = import_class(self.arg.feeder)
@@ -435,11 +436,11 @@ class Processor():
             '\tMean training loss: {:.4f}.  Mean training acc: {:.2f}%.'.format(np.mean(loss_value), np.mean(acc_value)*100))
         self.print_log('\tTime consumption: [Data]{dataloader}, [Network]{model}'.format(**proportion))
 
-        if save_model:
-            state_dict = self.model.state_dict()
-            weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
+        # if save_model:
+        #     state_dict = self.model.state_dict()
+        #     weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
 
-            torch.save(weights, self.arg.model_saved_name + '-' + str(epoch+1) + '-' + str(int(self.global_step)) + '.pt')
+        #     torch.save(weights, self.arg.model_saved_name + '-' + str(epoch+1) + '-' + str(int(self.global_step)) + '.pt')
 
     def eval(self, epoch, save_score=False, loader_name=['test'], wrong_file=None, result_file=None):
         if wrong_file is not None:
@@ -486,6 +487,10 @@ class Processor():
                 self.patient_epochs = 0
                 self.best_acc = accuracy
                 self.best_acc_epoch = epoch + 1
+                
+                state_dict = self.model.state_dict()
+                weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
+                torch.save(weights, self.best_model_path)
             else:
                 self.patient_epochs += 1
 
@@ -528,17 +533,17 @@ class Processor():
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
             self.print_log(f'# Parameters: {count_parameters(self.model)}')
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
-                save_model = (((epoch + 1) % self.arg.save_interval == 0) or (
-                        epoch + 1 == self.arg.num_epoch)) and (epoch+1) > self.arg.save_epoch
+                # save_model = (((epoch + 1) % self.arg.save_interval == 0) or (
+                #         epoch + 1 == self.arg.num_epoch)) and (epoch+1) > self.arg.save_epoch
 
-                self.train(epoch, save_model=save_model)
+                self.train(epoch, save_model=False)
 
                 self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
                 if self.patient_epochs >= self.arg.patient_epochs:
                     break
 
             # test the best model
-            weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
+            weights_path = self.best_model_path
             weights = torch.load(weights_path)
             if type(self.arg.device) is list:
                 if len(self.arg.device) > 1:
