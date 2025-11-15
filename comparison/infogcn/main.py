@@ -391,6 +391,10 @@ class Processor():
                 self.best_acc = accuracy
                 self.best_acc_epoch = epoch + 1
                 self.patient_epochs = 0
+                state_dict = self.model.state_dict()
+                weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
+                torch.save(weights, self.best_model_path)
+                
                 with open(f'{self.arg.work_dir}/best_score.pkl', 'wb') as f:
                     pickle.dump(score_dict, f)
             
@@ -424,7 +428,7 @@ class Processor():
                     break
 
             # test the best model
-            weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
+            weights_path = self.best_model_path
             weights = torch.load(weights_path)
             self.model.load_state_dict(weights)
 
