@@ -57,8 +57,6 @@ class Feeder(Dataset):
         else:
             raise NotImplementedError('data split only supports train/test')
         nan_out = np.isnan(self.data.mean(-1).mean(-1))==False
-        print("[InfoGCN Feeder] Num NaN samples removed:", (~nan_out).sum())
-        print("[InfoGCN Feeder] Label min/max after filter:", self.label.min(), self.label.max())
         
         self.data = self.data[nan_out]
         self.label = self.label[nan_out]
