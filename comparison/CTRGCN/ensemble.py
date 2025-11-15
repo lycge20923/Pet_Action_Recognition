@@ -5,12 +5,14 @@ import os
 import numpy as np
 from tqdm import tqdm
 
+from src.utils.cli_args import TrainingArguments, ComparisonArguments, DataArguments
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset',
-                        required=True,
-                        choices={'ntu/xsub', 'ntu/xview', 'ntu120/xsub', 'ntu120/xset', 'NW-UCLA'},
-                        help='the work folder for storing results')
+    # parser.add_argument('--dataset',
+    #                     required=True,
+    #                     choices={'ntu/xsub', 'ntu/xview', 'ntu120/xsub', 'ntu120/xset', 'NW-UCLA'},
+    #                     help='the work folder for storing results')
     parser.add_argument('--alpha',
                         default=1,
                         help='weighted summation',
@@ -22,45 +24,50 @@ if __name__ == "__main__":
                         help='Directory containing "epoch1_test_score.pkl" for bone eval results')
     parser.add_argument('--joint-motion-dir', default=None)
     parser.add_argument('--bone-motion-dir', default=None)
+    parser.add_argument("--fold_num", type=int, default=0)
 
     arg = parser.parse_args()
+    data_dir = os.path.join(DataArguments().data_dir, ComparisonArguments().new_data_dir_name)
+    npz_file_path = os.path.join(data_dir, f"data_fold_{arg.fold_num}.npz")
+    npz_data = np.load(npz_file_path)
+    label = np.where(npz_data['y_test'] > 0)[1]
+    
+    # dataset = arg.dataset
+    # if 'UCLA' in arg.dataset:
+    #     label = []
+    #     with open('./data/' + 'NW-UCLA/' + '/val_label.pkl', 'rb') as f:
+    #         data_info = pickle.load(f)
+    #         for index in range(len(data_info)):
+    #             info = data_info[index]
+    #             label.append(int(info['label']) - 1)
+    # elif 'ntu120' in arg.dataset:
+    #     if 'xsub' in arg.dataset:
+    #         npz_data = np.load('./data/' + 'ntu120/' + 'NTU120_CSub.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    #     elif 'xset' in arg.dataset:
+    #         npz_data = np.load('./data/' + 'ntu120/' + 'NTU120_CSet.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    # elif 'ntu' in arg.dataset:
+    #     if 'xsub' in arg.dataset:
+    #         npz_data = np.load('./data/' + 'ntu/' + 'NTU60_CS.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    #     elif 'xview' in arg.dataset:
+    #         npz_data = np.load('./data/' + 'ntu/' + 'NTU60_CV.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    # else:
+    #     raise NotImplementedError
 
-    dataset = arg.dataset
-    if 'UCLA' in arg.dataset:
-        label = []
-        with open('./data/' + 'NW-UCLA/' + '/val_label.pkl', 'rb') as f:
-            data_info = pickle.load(f)
-            for index in range(len(data_info)):
-                info = data_info[index]
-                label.append(int(info['label']) - 1)
-    elif 'ntu120' in arg.dataset:
-        if 'xsub' in arg.dataset:
-            npz_data = np.load('./data/' + 'ntu120/' + 'NTU120_CSub.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-        elif 'xset' in arg.dataset:
-            npz_data = np.load('./data/' + 'ntu120/' + 'NTU120_CSet.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-    elif 'ntu' in arg.dataset:
-        if 'xsub' in arg.dataset:
-            npz_data = np.load('./data/' + 'ntu/' + 'NTU60_CS.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-        elif 'xview' in arg.dataset:
-            npz_data = np.load('./data/' + 'ntu/' + 'NTU60_CV.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-    else:
-        raise NotImplementedError
-
-    with open(os.path.join(arg.joint_dir, 'epoch1_test_score.pkl'), 'rb') as r1:
+    with open(os.path.join(arg.joint_dir, 'best_test_score.pkl'), 'rb') as r1:
         r1 = list(pickle.load(r1).items())
 
-    with open(os.path.join(arg.bone_dir, 'epoch1_test_score.pkl'), 'rb') as r2:
+    with open(os.path.join(arg.bone_dir, 'best_test_score.pkl'), 'rb') as r2:
         r2 = list(pickle.load(r2).items())
 
     if arg.joint_motion_dir is not None:
-        with open(os.path.join(arg.joint_motion_dir, 'epoch1_test_score.pkl'), 'rb') as r3:
+        with open(os.path.join(arg.joint_motion_dir, 'best_test_score.pkl'), 'rb') as r3:
             r3 = list(pickle.load(r3).items())
     if arg.bone_motion_dir is not None:
-        with open(os.path.join(arg.bone_motion_dir, 'epoch1_test_score.pkl'), 'rb') as r4:
+        with open(os.path.join(arg.bone_motion_dir, 'best_test_score.pkl'), 'rb') as r4:
             r4 = list(pickle.load(r4).items())
 
     right_num = total_num = right_num_5 = 0
