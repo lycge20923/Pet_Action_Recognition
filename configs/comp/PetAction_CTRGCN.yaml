@@ -10,6 +10,7 @@ eval_interval: 10
 seed: 42
 patient_epochs: 500
 step: []
+save_score: True
 
 # ===== Dataset ===== #
 feeder: comparison.CTRGCN.feeders.feeder_PetAction.Feeder
@@ -20,14 +21,14 @@ train_feeder_args:
   debug: False
   p_interval: [0.5, 1]
   bone: False # modify
-  vel: True # modify
+  vel: False # modify
 test_feeder_args:
   data_path: ./data/main/comp_data/data_fold_0.npz # modify
   split: test
   window_size: 32
   p_interval: [0.95]
   bone: False # modify
-  vel: True # modify
+  vel: False # modify
 
 # ===== Model ===== #
 model: comparison.CTRGCN.model.ctrgcn.Model
