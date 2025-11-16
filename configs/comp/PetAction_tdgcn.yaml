@@ -13,8 +13,8 @@ train_feeder_args:
   normalization: False
   random_rot: True
   p_interval: [0.5, 1]
-  bone: False # modify
-  vel: True # modify
+  bone: True # modify
+  vel: False # modify
 
 test_feeder_args:
   data_path: ./data/main/comp_data/data_joint_fold_1.npz # modify
@@ -22,8 +22,8 @@ test_feeder_args:
   window_size: 32
   p_interval: [0.95]
   debug: False
-  bone: False # modify
-  vel: True # modify
+  bone: True # modify
+  vel: False # modify
   
 
 # model
