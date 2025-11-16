@@ -1,0 +1,56 @@
+# work_dir: ./work_dir/ntu60/xsub/ctrgcn_joint
+
+# feeder
+feeder: comparison.tdgcn.feeders.feeder_PetAction.Feeder
+train_feeder_args:
+  data_path: ./data/main/comp_data/data_joint_fold_1.npz # modify
+  split: train
+  debug: False
+  random_choose: False
+  random_shift: False
+  random_move: False
+  window_size: 32
+  normalization: False
+  random_rot: True
+  p_interval: [0.5, 1]
+  bone: False # modify
+  vel: True # modify
+
+test_feeder_args:
+  data_path: ./data/main/comp_data/data_joint_fold_1.npz # modify
+  split: test
+  window_size: 32
+  p_interval: [0.95]
+  debug: False
+  bone: False # modify
+  vel: True # modify
+  
+
+# model
+model: comparison.tdgcn.model.tdgcn.Model
+model_args:
+  num_class: 11
+  num_point: 17
+  num_person: 1
+  graph: comparison.tdgcn.graph.AP10K.Graph
+  graph_args:
+    labeling_mode: 'spatial'
+
+#optim
+weight_decay: 0.0004
+base_lr: 0.001
+lr_decay_rate: 0.1
+step: []
+patient_epochs: 500
+save_score: True
+
+# training
+batch_size: 32
+test_batch_size: 64
+num_epoch: 3
+nesterov: True
+save_interval: 10
+save_epoch: 10
+eval_interval: 10
+seed: 42
+device: [0]

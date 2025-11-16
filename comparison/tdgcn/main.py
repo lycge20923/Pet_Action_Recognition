@@ -25,8 +25,7 @@ import yaml
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
-from ..dict import DictAction
-from src.utils.cli_args import TrainingArguments
+# from torchlight import DictAction
 
 
 import resource
@@ -34,11 +33,12 @@ rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
 
 import datetime
+from ..dict import DictAction
+from src.utils.cli_args import TrainingArguments
 
 def timestamp():
     now = datetime.datetime.now()
     return (now.strftime("%Y%m%d%H%M%S"))
-
 
 def init_seed(seed):
     torch.cuda.manual_seed_all(seed)
@@ -78,7 +78,9 @@ def get_parser():
     parser.add_argument('-model_saved_name', default='')
     parser.add_argument(
         '--config',
-        default='./config/nturgbd-cross-view/test_bone.yaml',
+        #default='config/ucla/default.yaml',
+        default = 'config/shrec17/shrec17.yaml',
+        #default = 'config/dhg14-28/DHG14-28.yaml',
         help='path to the configuration file')
 
     # processor
@@ -131,7 +133,7 @@ def get_parser():
     parser.add_argument(
         '--num-worker',
         type=int,
-        default=32,
+        default=32, # 32
         help='the number of worker for data loader')
     parser.add_argument(
         '--train-feeder-args',
@@ -174,7 +176,7 @@ def get_parser():
     parser.add_argument(
         '--device',
         type=int,
-        default=0,
+        default=4,
         nargs='+',
         help='the indexes of GPUs for training or testing')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
@@ -284,16 +286,17 @@ class Processor():
             worker_init_fn=init_seed)
 
     def load_model(self):
-        
         output_device = self.arg.device[0] if type(self.arg.device) is list else self.arg.device
         self.output_device = output_device
         Model = import_class(self.arg.model)
         shutil.copy2(inspect.getfile(Model), self.arg.work_dir)
+        print(Model)
         self.model = Model(**self.arg.model_args)
+        print(self.model)
         self.loss = nn.CrossEntropyLoss().cuda(output_device)
 
         if self.arg.weights:
-            self.global_step = int(arg.weights[:-3].split('-')[-1])
+            # self.global_step = int(arg.weights[:-3].split('-')[-1])
             self.print_log('Load weights from {}.'.format(self.arg.weights))
             if '.pkl' in self.arg.weights:
                 with open(self.arg.weights, 'r') as f:
@@ -482,15 +485,21 @@ class Processor():
             loss = np.mean(loss_value)
             if 'ucla' in self.arg.feeder:
                 self.data_loader[ln].dataset.sample_name = np.arange(len(score))
+
+            if 'shrec17' in self.arg.feeder: # new adding
+                self.data_loader[ln].dataset.sample_name = np.arange(len(score))
+                
+            if 'dhg14_28' in self.arg.feeder: # new adding
+                self.data_loader[ln].dataset.sample_name = np.arange(len(score))
+
             accuracy = self.data_loader[ln].dataset.top_k(score, 1)
             
             score_dict = dict(
                 zip(self.data_loader[ln].dataset.sample_name, score))
             if accuracy > self.best_acc:
-                self.patient_epochs = 0
                 self.best_acc = accuracy
                 self.best_acc_epoch = epoch + 1
-                
+                self.patient_epochs = 0
                 state_dict = self.model.state_dict()
                 weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
                 torch.save(weights, self.best_model_path)
@@ -506,7 +515,8 @@ class Processor():
                 self.val_writer.add_scalar('loss', loss, self.global_step)
                 self.val_writer.add_scalar('acc', accuracy, self.global_step)
 
-            
+            # score_dict = dict(
+            #     zip(self.data_loader[ln].dataset.sample_name, score))
             self.print_log('\tMean {} loss of {} batches: {}.'.format(
                 ln, len(self.data_loader[ln]), np.mean(loss_value)))
             for k in self.arg.show_topk:
@@ -530,7 +540,6 @@ class Processor():
                 writer.writerow(each_acc)
                 writer.writerows(confusion)
 
-
     def start(self):
         if self.arg.phase == 'train':
             self.print_log('Parameters:\n{}\n'.format(str(vars(self.arg))))
@@ -538,6 +547,7 @@ class Processor():
             def count_parameters(model):
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
             self.print_log(f'# Parameters: {count_parameters(self.model)}')
+            
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
                 # save_model = (((epoch + 1) % self.arg.save_interval == 0) or (
                 #         epoch + 1 == self.arg.num_epoch)) and (epoch+1) > self.arg.save_epoch
@@ -549,6 +559,7 @@ class Processor():
                     break
 
             # test the best model
+            # weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
             weights_path = self.best_model_path
             weights = torch.load(weights_path)
             if type(self.arg.device) is list:
@@ -614,8 +625,7 @@ if __name__ == '__main__':
     fold_num = os.path.basename(train_feeder_args["data_path"])[-5]
     bone = train_feeder_args["bone"]
     vel = train_feeder_args["vel"]
-    
-    arg.work_dir = os.path.join(runs_dir, f"comp_CTRGCN_{fold_num}_{bone}_{vel}_{timestamp()}")
+    arg.work_dir = os.path.join(runs_dir, f"comp_tdgcn_{fold_num}_{bone}_{vel}_{timestamp()}")
     
     processor = Processor(arg)
     processor.start()

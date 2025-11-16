@@ -402,6 +402,16 @@ def main():
             strict_shape=True,
         )
         logger.info(f"[convert] x_test shape:  {x_test.shape}, y_test shape:  {y_test.shape}")
+        
+        # for tdgcn
+        y_test_idx = np.where(y_test > 0)[1]
+        val_sample_txt_path = os.path.join(output_dir, f"val_sample_fold_{fold_num}.txt")
+        with open(val_sample_txt_path, "w") as f:
+            for cls in y_test_idx:
+                # cls 是 0-based，所以要 +1，再補成 3 位數
+                f.write(f"{cls + 1:03d}\n")
+
+        logger.info(f"[convert] Saving val_sample txt to: {val_sample_txt_path}")
 
         # Ensure output dir exists
         out_dir = os.path.dirname(output_dir)
