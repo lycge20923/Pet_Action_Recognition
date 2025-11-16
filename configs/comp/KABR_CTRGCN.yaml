@@ -33,7 +33,7 @@ test_feeder_args:
 # ===== Model ===== #
 model: comparison.CTRGCN.model.ctrgcn.Model
 model_args:
-  num_class: 11
+  num_class: 8
   num_point: 17
   num_person: 1
   graph: comparison.CTRGCN.graph.AP10K.Graph
