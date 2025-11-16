@@ -103,7 +103,14 @@ class Processor():
             else:
                 data_path = os.path.join(data_params.data_dir, com_params.new_data_dir_name, 
                                         f"data_{self.arg.mode}_vel_fold_{self.arg.fold_num}.npz")
-        print(data_path)
+        else:
+            if not self.arg.use_vel:
+                data_path = os.path.join(com_params.other_data_dir_name, com_params.new_data_dir_name, 
+                                        f"data_{self.arg.mode}_fold_{self.arg.fold_num}.npz")
+            else:
+                data_path = os.path.join(com_params.other_data_dir_name, com_params.new_data_dir_name, 
+                                        f"data_{self.arg.mode}_vel_fold_{self.arg.fold_num}.npz")
+                
         # data_path = f'data/{self.arg.dataset}/{self.arg.datacase}_aligned.npz'
         if self.arg.phase == 'train':
             dt = Feeder(data_path=data_path,

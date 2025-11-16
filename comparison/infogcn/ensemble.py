@@ -3,29 +3,46 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 
-def ensemble(ds, items):
-    if 'ntu120' in ds:
-        num_class=120
-        if 'xsub' in ds:
-            npz_data = np.load('./data/ntu120/CSub_aligned.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-        elif 'xset' in ds:
-            npz_data = np.load('./data/ntu120/CSet_aligned.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-    elif 'ntu' in ds:
-        num_class=60
-        if 'xsub' in ds:
-            npz_data = np.load('./data/ntu/CS_aligned.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-        elif 'xview' in ds:
-            npz_data = np.load('./data/ntu/CV_aligned.npz')
-            label = np.where(npz_data['y_test'] > 0)[1]
-    elif 'ucla' in ds:
-        num_class=10
-        npz_data = np.load('./data/ntu/CS_aligned.npz')
-        label = np.where(npz_data['y_test'] > 0)[1]
+import os
+from src.utils.cli_args import ComparisonArguments, DataArguments
+
+
+def ensemble(ds, items, fold_num):
+    # if 'ntu120' in ds:
+    #     num_class=120
+    #     if 'xsub' in ds:
+    #         npz_data = np.load('./data/ntu120/CSub_aligned.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    #     elif 'xset' in ds:
+    #         npz_data = np.load('./data/ntu120/CSet_aligned.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    # elif 'ntu' in ds:
+    #     num_class=60
+    #     if 'xsub' in ds:
+    #         npz_data = np.load('./data/ntu/CS_aligned.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    #     elif 'xview' in ds:
+    #         npz_data = np.load('./data/ntu/CV_aligned.npz')
+    #         label = np.where(npz_data['y_test'] > 0)[1]
+    # elif 'ucla' in ds:
+    #     num_class=10
+    #     npz_data = np.load('./data/ntu/CS_aligned.npz')
+    #     label = np.where(npz_data['y_test'] > 0)[1]
+    # else:
+    #     raise NotImplementedError
+    data_params = DataArguments()
+    comp_params = ComparisonArguments()
+    if "PetAction" in ds:
+        num_class = 11
+        data_path = os.path.join(data_params.data_dir, comp_params.new_data_dir_name)
     else:
-        raise NotImplementedError
+        fold_num = 0
+        num_class = 8
+        data_path = os.path.join(comp_params.other_data_dir_name, comp_params.new_data_dir_name)
+    
+    npz_file_path = os.path.join(data_path, f"data_joint_fold_{fold_num}.npz")
+    npz_data = np.load(npz_file_path)
+    label = np.where(npz_data['y_test'] > 0)[1]
 
     ckpt_dirs, alphas = list(zip(*items))
 
@@ -59,13 +76,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset',
                         required=True,
-                        choices={'ntu/xsub', 'ntu/xview', 'ntu120/xsub', 'ntu120/xset', 'NW-UCLA'},
+                        choices={"PetAction", "KABR"},
                         help='the work folder for storing results')
 
     parser.add_argument('--position_ckpts', nargs='+',
                         help='Directory containing "epoch1_test_score.pkl" for position eval results')
     parser.add_argument('--motion_ckpts', nargs='+',
                         help='Directory containing "epoch1_test_score.pkl" for motion eval results')
+    parser.add_argument("--fold_num", default=0, type=int)
 
     arg = parser.parse_args()
 
@@ -75,4 +93,4 @@ if __name__ == "__main__":
     for ckpt in arg.motion_ckpts:
         item.append((ckpt, 1))
 
-    ensemble(arg.dataset, item)
+    ensemble(arg.dataset, item, arg.fold_num)
