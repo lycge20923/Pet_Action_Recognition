@@ -63,13 +63,13 @@ data = dict(
     val=dict(type=dataset_type, split='xsub_val', ann_file=ann_file, data_prefix=data_root, pipeline=val_pipeline),
     test=dict(type=dataset_type, split='xsub_val', ann_file=ann_file, data_prefix=data_root, pipeline=test_pipeline))
 # optimizer
-optimizer = dict(type='SGD', lr=0.15, momentum=0.9, weight_decay=0.0001)  # this lr is used for 8 gpus
+optimizer = dict(type='SGD', lr=0.015, momentum=0.9, weight_decay=0.0001)  # this lr is used for 8 gpus
 optimizer_config = dict(grad_clip=dict(max_norm=40, norm_type=2))
 # learning policy
-lr_config = dict(policy='CosineAnnealing', by_epoch=False, min_lr=0)
-total_epochs = 18
+lr_config = dict(policy='CosineAnnealing', by_epoch=False, min_lr=0.005)
+total_epochs = 100
 checkpoint_config = dict(interval=1)
 evaluation = dict(interval=1, metrics=['top_k_accuracy', 'mean_class_accuracy'], topk=(1, 5))
 log_config = dict(interval=20, hooks=[dict(type='TextLoggerHook')])
-work_dir = './runs/rgbpose_conv3d/PetAction_rgb_only'
+work_dir = './runs/rgbpose_conv3d/PetAction_rgb_only_11171518'
 seed = 42

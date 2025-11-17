@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument(
         "--annotation_json",
         type=str,
-        required=True,
+        default="data/main/train_split/annotation_windows_metadata.json",
         help="Path to your annotation JSON file",
     )
     parser.add_argument(

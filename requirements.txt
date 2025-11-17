@@ -22,4 +22,5 @@ pytorchvideo
 torchlight
 tensorboardX
 decord
+mmcv
 mmcv-full
