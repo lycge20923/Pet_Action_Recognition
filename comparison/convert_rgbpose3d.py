@@ -120,7 +120,7 @@ def build_ntu_style_annotations(samples, img_h=256, img_w=256):
     folds = []
     for s in tqdm(samples, desc="Building NTU-style annotations"):
         sample_id = int(s["sample_id"])
-        frame_dir = f"{sample_id:06d}"
+        filename = f"{sample_id:06d}.mp4"
 
         kp_path = s["kp_feature_file"]
         kp = np.load(kp_path)  # (T, V, 3)
@@ -129,6 +129,7 @@ def build_ntu_style_annotations(samples, img_h=256, img_w=256):
 
         T, V, C = kp.shape
         xy = kp[..., :2]      # (T, V, 2)
+        xy = xy * 256.0
         score = kp[..., 2]    # (T, V)
 
         # Add person dimension: M = 1
@@ -139,7 +140,7 @@ def build_ntu_style_annotations(samples, img_h=256, img_w=256):
         fold = int(s["fold"])
 
         ann = dict(
-            frame_dir=frame_dir,
+            filename=filename,
             total_frames=T,
             img_shape=(img_h, img_w),
             original_shape=(img_h, img_w),
@@ -155,7 +156,7 @@ def build_ntu_style_annotations(samples, img_h=256, img_w=256):
         )
 
         annotations.append(ann)
-        frame_dirs.append(frame_dir)
+        frame_dirs.append(filename)
         folds.append(fold)
 
     return annotations, frame_dirs, folds

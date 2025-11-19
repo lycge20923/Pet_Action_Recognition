@@ -24,7 +24,7 @@ ann_file = 'data/main/comp_data_rgbpose3d/PetAction_ann/pet_hrnet_fold0.pkl'
 left_kp = [0, 5, 6, 7, 11, 12, 13]
 right_kp = [1, 8, 9, 10, 14, 15, 16]
 train_pipeline = [
-    dict(type='UniformSampleFrames', clip_len=32),
+    dict(type='UniformSampleFrames', clip_len=32, num_clips=1),
     dict(type='PoseDecode'),
     dict(type='PoseCompact', hw_ratio=1., allow_imgpad=True),
     dict(type='Resize', scale=(64, 64), keep_ratio=False),
@@ -68,13 +68,14 @@ data = dict(
     val=dict(type=dataset_type, ann_file=ann_file, split='xsub_val', pipeline=val_pipeline),
     test=dict(type=dataset_type, ann_file=ann_file, split='xsub_val', pipeline=test_pipeline))
 # optimizer
-optimizer = dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0003)  # this lr is used for 8 gpus
+optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0003)  # this lr is used for 8 gpus
 optimizer_config = dict(grad_clip=dict(max_norm=40, norm_type=2))
 # learning policy
-lr_config = dict(policy='CosineAnnealing', by_epoch=False, min_lr=0.005)
+# lr_config = dict(policy='fixed')
+lr_config = dict(policy='CosineAnnealing', by_epoch=False, min_lr=0.001)
 total_epochs = 100
 checkpoint_config = dict(interval=1)
 evaluation = dict(interval=1, metrics=['top_k_accuracy', 'mean_class_accuracy'], topk=(1, 5))
 log_config = dict(interval=20, hooks=[dict(type='TextLoggerHook')])
-work_dir = './runs/rgbpose_conv3d/PetAction_pose_only_11171518'
+work_dir = './runs/rgbpose_conv3d/PetAction_pose_only_11181900'
 seed = 42

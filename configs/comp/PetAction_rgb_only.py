@@ -19,7 +19,7 @@ ann_file = 'data/main/comp_data_rgbpose3d/PetAction_ann/pet_hrnet_fold0.pkl' # m
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_bgr=False)
 
 train_pipeline = [
-    dict(type='MMUniformSampleFrames', clip_len=dict(RGB=8), num_clips=1),
+    dict(type='MMUniformSampleFrames', clip_len=dict(RGB=16), num_clips=1),
     dict(type='MMDecode'),
     dict(type='MMCompact', hw_ratio=1., allow_imgpad=True),
     dict(type='Resize', scale=(256, 256), keep_ratio=False),
@@ -32,7 +32,7 @@ train_pipeline = [
     dict(type='ToTensor', keys=['imgs', 'label'])
 ]
 val_pipeline = [
-    dict(type='MMUniformSampleFrames', clip_len=dict(RGB=8), num_clips=1),
+    dict(type='MMUniformSampleFrames', clip_len=dict(RGB=16), num_clips=1),
     dict(type='MMDecode'),
     dict(type='MMCompact', hw_ratio=1., allow_imgpad=True),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
@@ -42,7 +42,7 @@ val_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 test_pipeline = [
-    dict(type='MMUniformSampleFrames', clip_len=dict(RGB=8), num_clips=10),
+    dict(type='MMUniformSampleFrames', clip_len=dict(RGB=16), num_clips=1),
     dict(type='MMDecode'),
     dict(type='MMCompact', hw_ratio=1., allow_imgpad=True),
     dict(type='Resize', scale=(224, 224), keep_ratio=False),
@@ -52,7 +52,7 @@ test_pipeline = [
     dict(type='ToTensor', keys=['imgs'])
 ]
 data = dict(
-    videos_per_gpu=32,
+    videos_per_gpu=16,
     workers_per_gpu=4,
     val_dataloader=dict(videos_per_gpu=1),
     test_dataloader=dict(videos_per_gpu=1),
@@ -63,13 +63,13 @@ data = dict(
     val=dict(type=dataset_type, split='xsub_val', ann_file=ann_file, data_prefix=data_root, pipeline=val_pipeline),
     test=dict(type=dataset_type, split='xsub_val', ann_file=ann_file, data_prefix=data_root, pipeline=test_pipeline))
 # optimizer
-optimizer = dict(type='SGD', lr=0.015, momentum=0.9, weight_decay=0.0001)  # this lr is used for 8 gpus
+optimizer = dict(type='SGD', lr=0.001, momentum=0.9, weight_decay=0.0001)  # this lr is used for 8 gpus
 optimizer_config = dict(grad_clip=dict(max_norm=40, norm_type=2))
 # learning policy
-lr_config = dict(policy='CosineAnnealing', by_epoch=False, min_lr=0.005)
+lr_config = dict(policy='CosineAnnealing', by_epoch=False, min_lr=0.0005)
 total_epochs = 100
 checkpoint_config = dict(interval=1)
 evaluation = dict(interval=1, metrics=['top_k_accuracy', 'mean_class_accuracy'], topk=(1, 5))
 log_config = dict(interval=20, hooks=[dict(type='TextLoggerHook')])
-work_dir = './runs/rgbpose_conv3d/PetAction_rgb_only_11171518'
+work_dir = './runs/rgbpose_conv3d/PetAction_rgb_only_11181900'
 seed = 42
