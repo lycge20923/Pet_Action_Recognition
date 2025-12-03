@@ -196,32 +196,33 @@ def predict():
         do_crop=data_params.do_crop
     )
     
-    resize_scale = of_params.input_model_size
+    resize_scale = of_params.input_model_size   # e.g. (256, 256) ; assume correct order (W, H)
+    W, H = resize_scale
     crop_kp_vis_path = os.path.join(output_dir, f"{base}_crop_kp.{extension}")
-
     cap_crop = cv2.VideoCapture(output_crop_path)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    writer_crop_kp = cv2.VideoWriter(crop_kp_vis_path, fourcc, fps,
-                                     resize_scale)
-
+    writer_crop_kp = cv2.VideoWriter(
+        crop_kp_vis_path,
+        fourcc,
+        fps,
+        (W, H)     # OpenCV expects (width, height)
+    )
     num_frames_kp = keypoints_arr.shape[0]
     frame_idx = 0
     while True:
         ret, frame_crop = cap_crop.read()
         if not ret or frame_idx >= num_frames_kp:
             break
-
-        kps = keypoints_arr[frame_idx]  # shape (V,3)
-
-        for x, y, conf in kps:
+        kps = keypoints_arr[frame_idx]  # shape (V, 3)
+        for x_norm, y_norm, conf in kps:
             if conf <= 0:
                 continue
-
-            x_int = int(round(x))
-            y_int = int(round(y))
-
-            if 0 <= x_int < resize_scale[0] and 0 <= y_int < resize_scale[1]:
-                cv2.circle(frame_crop, (x_int, y_int), 2, (0,0,255), -1)  # 紅點
+            # ---- 0~1 normalized → pixel coordinate ----
+            x_int = int(round(x_norm * W))
+            y_int = int(round(y_norm * H))
+            # ---- boundary check ----
+            if 0 <= x_int < W and 0 <= y_int < H:
+                cv2.circle(frame_crop, (x_int, y_int), 2, (0, 0, 255), -1)
 
         writer_crop_kp.write(frame_crop)
         frame_idx += 1
