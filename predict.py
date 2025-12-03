@@ -154,6 +154,36 @@ def predict():
     keypoints_arr = np.array(bbox_pe_annotation)
     np.save(os.path.join(output_dir, f"{base}_keypoints.npy"), keypoints_arr)
     
+    bboxes_arr = np.array(bbox_annotation, dtype=object)
+    np.save(os.path.join(output_dir, f"{base}_bboxes.npy"), bboxes_arr)
+
+    bbox_vis_path = os.path.join(output_dir, f"{base}_bbox_detect.{extension}")
+    cap = cv2.VideoCapture(input_path)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(bbox_vis_path, fourcc, fps, (frame_width, frame_height))
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret or frame_idx >= len(bbox_annotation):
+            break
+
+        b = bbox_annotation[frame_idx]
+        if b != []:
+            x_min, y_min, x_max, y_max = b
+            x_min = max(1, min(int(x_min), frame_width - 1))
+            x_max = max(1, min(int(x_max), frame_width - 1))
+            y_min = max(1, min(int(y_min), frame_height - 1))
+            y_max = max(1, min(int(y_max), frame_height - 1))
+            cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 0, 255), 2)
+
+        writer.write(frame)
+        frame_idx += 1
+
+    cap.release()
+    writer.release()
+    logger.info(f"Saved bbox detection visualization to {bbox_vis_path}")
+    
     # extract optical flow
     of_params = OpticalFlowArguments()
     optical_model = OpticalFlowModel(**asdict(of_params))
@@ -165,6 +195,40 @@ def predict():
         resize_scale=of_params.input_model_size,
         do_crop=data_params.do_crop
     )
+    
+    resize_scale = of_params.input_model_size
+    crop_kp_vis_path = os.path.join(output_dir, f"{base}_crop_kp.{extension}")
+
+    cap_crop = cv2.VideoCapture(output_crop_path)
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer_crop_kp = cv2.VideoWriter(crop_kp_vis_path, fourcc, fps,
+                                     resize_scale)
+
+    num_frames_kp = keypoints_arr.shape[0]
+    frame_idx = 0
+    while True:
+        ret, frame_crop = cap_crop.read()
+        if not ret or frame_idx >= num_frames_kp:
+            break
+
+        kps = keypoints_arr[frame_idx]  # shape (V,3)
+
+        for x, y, conf in kps:
+            if conf <= 0:
+                continue
+
+            x_int = int(round(x))
+            y_int = int(round(y))
+
+            if 0 <= x_int < resize_scale[0] and 0 <= y_int < resize_scale[1]:
+                cv2.circle(frame_crop, (x_int, y_int), 2, (0,0,255), -1)  # 紅點
+
+        writer_crop_kp.write(frame_crop)
+        frame_idx += 1
+
+    cap_crop.release()
+    writer_crop_kp.release()
+    logger.info(f"Saved cropped + padded + keypoint visualization to {crop_kp_vis_path}")
     
     output_of_path = os.path.join(output_dir, f"{base}_optical_flow.{extension}")
     start_time= time.time()
