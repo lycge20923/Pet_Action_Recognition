@@ -11,6 +11,7 @@ import cv2
 from natsort import natsorted
 import pandas as pd
 from tqdm import tqdm
+import subprocess
 
 def image2video(data_dir):
     path_to_image = os.path.join(data_dir, "dataset", "image")
@@ -115,14 +116,43 @@ def cbvd(download_path):
 
 def lote(download_path):
     
-    print("First, manually download to `./LoTE.zip` in https://drive.google.com/file/d/1jedfvdtfzQ9NHFULkISooAqTvCpTO-0s/view")
+    print("First, manually download to `./Action.zip` in https://drive.google.com/file/d/1jedfvdtfzQ9NHFULkISooAqTvCpTO-0s/view")
     
     TEMP_PATH = "Action.zip"
+    
+    temp_download_dir = os.path.join(os.path.dirname(download_path), "temp_LoTE")
     with zipfile.ZipFile(TEMP_PATH, "r") as zip_ref:
-        zip_ref.extractall(download_path)
+        zip_ref.extractall(temp_download_dir)
         
     # os.remove(TEMP_PATH)
-    print("Saved to:", download_path)
+    print("Saved to temp dir:", temp_download_dir)
+    
+    action_names = os.listdir(temp_download_dir)
+    source_id = 0
+    for action_name in action_names:
+        action_folder = os.path.join(temp_download_dir, action_name)
+        print(f"Processing action folder: {action_name}")
+        for fname in sorted(os.listdir(action_folder)):
+            src_path = os.path.join(action_folder, fname)
+            clip_idx = 0
+            new_filename = f"{source_id}_{action_name}_{clip_idx}.mp4"
+            dst_path = os.path.join(download_path, new_filename)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", src_path,
+                "-c:v", "libx264",
+                "-c:a", "aac",
+                dst_path
+            ]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(f"[ERROR] Failed converting {src_path}")
+                print(result.stderr.decode("utf-8", errors="ignore"))
+            else:
+                print(f"[OK] {src_path} -> {dst_path}")
+            source_id += 1
+    os.rmdir(temp_download_dir)
 
 def kabr(download_path):
     from datasets import load_dataset

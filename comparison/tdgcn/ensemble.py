@@ -106,11 +106,11 @@ if __name__ == "__main__":
         Numclass = 11
     else:
         npz_file_path = os.path.join(comp_params.other_data_dir_name, comp_params.new_data_dir_name, "data_joint_fold_0.npz")
-        val_txt_file = os.path.join(data_params.data_dir, comp_params.new_data_dir_name, f"val_sample_fold_0.txt")
+        val_txt_file = os.path.join(comp_params.other_data_dir_name, comp_params.new_data_dir_name, f"val_sample_fold_0.txt")
         Numclass = 8
 
     File = [j_file, b_file, jm_file, bm_file] 
-    Rate = [0., 0., 0., 0.]    
+    Rate = [1, 1, 1, 1]    
     # if args.benchmark == 'NTU60XSub':
     #     Numclass = 60
     #     Sample_Num = 16487

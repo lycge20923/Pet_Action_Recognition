@@ -208,7 +208,7 @@ def local_flow_stats(keypoints: torch.Tensor,
         flow_rep, grid,
         mode='nearest',
         padding_mode='border',
-        align_corners=False
+        align_corners=True
     )  # (BTJ, 2, ps, ps)
     
     # 7) 整理成 (B, 2*ps*ps, T, J)

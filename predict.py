@@ -90,6 +90,7 @@ def predict():
     
     data_params = DataArguments()
     output_params = ResultsArguments()
+    of_params = OpticalFlowArguments()
     
     # --- set output folder ---
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -149,7 +150,7 @@ def predict():
             keypoints = [[float(ele[1]), float(ele[0]), float(ele[2])] for ele in keypoints[0][1]]
             bboxes = bboxes_.tolist()[0]
         bbox_annotation.append(bboxes)
-        normalized_keypoints = normalize_keypoints(keypoints, bboxes, num_nodes=data_params.num_nodes)
+        normalized_keypoints = normalize_keypoints(keypoints, bboxes, num_nodes=data_params.num_nodes, flow_size=of_params.input_model_size)
         bbox_pe_annotation.append(normalized_keypoints)
     keypoints_arr = np.array(bbox_pe_annotation)
     np.save(os.path.join(output_dir, f"{base}_keypoints.npy"), keypoints_arr)
@@ -185,7 +186,6 @@ def predict():
     logger.info(f"Saved bbox detection visualization to {bbox_vis_path}")
     
     # extract optical flow
-    of_params = OpticalFlowArguments()
     optical_model = OpticalFlowModel(**asdict(of_params))
     output_crop_path = os.path.join(output_dir, f"{base}_crop.{extension}")
     crop_and_save_video(
@@ -199,6 +199,8 @@ def predict():
     resize_scale = of_params.input_model_size   # e.g. (256, 256) ; assume correct order (W, H)
     W, H = resize_scale
     crop_kp_vis_path = os.path.join(output_dir, f"{base}_crop_kp.{extension}")
+    bones = data_params.neighbor_base
+    
     cap_crop = cv2.VideoCapture(output_crop_path)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     writer_crop_kp = cv2.VideoWriter(
@@ -214,22 +216,36 @@ def predict():
         if not ret or frame_idx >= num_frames_kp:
             break
         kps = keypoints_arr[frame_idx]  # shape (V, 3)
+
+        # ---- 先把點轉成 pixel ----
+        pts = []
         for x_norm, y_norm, conf in kps:
             if conf <= 0:
+                pts.append(None)
                 continue
-            # ---- 0~1 normalized → pixel coordinate ----
             x_int = int(round(x_norm * W))
             y_int = int(round(y_norm * H))
-            # ---- boundary check ----
-            if 0 <= x_int < W and 0 <= y_int < H:
-                cv2.circle(frame_crop, (x_int, y_int), 2, (0, 0, 255), -1)
+            pts.append((x_int, y_int))
+
+        # ---- 畫骨架線（綠色）----
+        for a, b in bones:
+            if a < len(pts) and b < len(pts):
+                pa = pts[a]
+                pb = pts[b]
+                if pa is not None and pb is not None:
+                    cv2.line(frame_crop, pa, pb, (0, 255, 0), 2)
+
+        # ---- 畫點（紅色）----
+        for p in pts:
+            if p is not None:
+                cv2.circle(frame_crop, p, 2, (0, 0, 255), -1)
 
         writer_crop_kp.write(frame_crop)
         frame_idx += 1
 
     cap_crop.release()
     writer_crop_kp.release()
-    logger.info(f"Saved cropped + padded + keypoint visualization to {crop_kp_vis_path}")
+    logger.info(f"Saved cropped + padded + keypoints+connections to {crop_kp_vis_path}")
     
     output_of_path = os.path.join(output_dir, f"{base}_optical_flow.{extension}")
     start_time= time.time()

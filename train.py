@@ -13,6 +13,7 @@ import torch
 import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
+from torch.amp import autocast
 
 from src.models.model import ActionRecognitionModel, ContrastiveActionWrapper
 from src.models.loss import ContrastiveLoss
@@ -229,22 +230,23 @@ def train_one_epoch(model,
             flow1, flow2 = flow1.to(device) if flow1 is not None else None, flow2.to(device) if flow2 is not None else None
             rgb1, rgb2 = rgb1.to(device) if rgb1 is not None else None, rgb2.to(device) if rgb2 is not None else None
             lab1, lab2 = lab1.to(device), lab2.to(device)
-            y = y.to(device)            
-            emb1, logit1, cos_loss_1 = model(kp1, flow1, rgb1)
-            emb2, logit2, cos_loss_2 = model(kp2 ,flow2, rgb2)
-            
-            # calculate loss
-            loss_ce_part1 = cross_entropy_loss(logit1, lab1)
-            loss_ce_part2 = cross_entropy_loss(logit2, lab2)
-            batch_loss_ce = loss_ce_part1 + loss_ce_part2
-            
-            batch_loss_cl = contrastive_loss(emb1, emb2, y) * train_params.contrastive_loss_coefficient
-            wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
-            
-            batch_loss_total = batch_loss_ce + batch_loss_cl 
-            if train_params.add_similarity_loss and (cos_loss_1 is not None and cos_loss_2 is not None):
-                batch_loss_total += (cos_loss_1 + cos_loss_2)
-            batch_loss_total.backward()
+            y = y.to(device)
+            with autocast("cuda", enabled=train_params.use_autocast):
+                emb1, logit1, cos_loss_1 = model(kp1, flow1, rgb1)
+                emb2, logit2, cos_loss_2 = model(kp2 ,flow2, rgb2)
+                
+                # calculate loss
+                loss_ce_part1 = cross_entropy_loss(logit1, lab1)
+                loss_ce_part2 = cross_entropy_loss(logit2, lab2)
+                batch_loss_ce = loss_ce_part1 + loss_ce_part2
+                
+                batch_loss_cl = contrastive_loss(emb1, emb2, y) * train_params.contrastive_loss_coefficient
+                wandb.log({"train_batch_loss_cl":batch_loss_cl.item()})
+                
+                batch_loss_total = batch_loss_ce + batch_loss_cl 
+                if train_params.add_similarity_loss and (cos_loss_1 is not None and cos_loss_2 is not None):
+                    batch_loss_total += (cos_loss_1 + cos_loss_2)
+                batch_loss_total.backward()
             
             optimizer.step()
             
@@ -263,14 +265,16 @@ def train_one_epoch(model,
             rgb = rgb.to(device) if rgb is not None else None
             label = label.to(device)
             
-            _, output, cos_loss = model(kps, flow, rgb)
+            with autocast("cuda", enabled=train_params.use_autocast):
+                _, output, cos_loss = model(kps, flow, rgb)
 
-            batch_loss_ce = cross_entropy_loss(output, label)
-            batch_loss_total = batch_loss_ce
-            if train_params.add_similarity_loss and cos_loss is not None:
-                batch_loss_total += cos_loss
+                batch_loss_ce = cross_entropy_loss(output, label)
+                batch_loss_total = batch_loss_ce
+                if train_params.add_similarity_loss and cos_loss is not None:
+                    batch_loss_total += cos_loss
+                
+                batch_loss_total.backward() 
             
-            batch_loss_total.backward() 
             optimizer.step()
 
             current_batch_size = label.size(0)
@@ -315,25 +319,26 @@ def val_one_epoch(model,
             rgb = rgb.to(device) if rgb is not None else None
             label = label.to(device)
             
-            if train_params.add_contrastive_loss:
-                _, output, cos_loss = model.backbone(kps, flow, rgb)
-            else:
-                _, output, cos_loss = model(kps, flow, rgb)
+            with autocast("cuda", enabled=train_params.use_autocast):
+                if train_params.add_contrastive_loss:
+                    _, output, cos_loss = model.backbone(kps, flow, rgb)
+                else:
+                    _, output, cos_loss = model(kps, flow, rgb)
 
-            loss = cross_entropy_loss(output, label)
-            if train_params.add_similarity_loss and cos_loss is not None:
-                loss += cos_loss
-            current_batch_size = label.size(0)
-            total_samples += current_batch_size
-            if not torch.isnan(loss).any():
-                test_loss += loss.item() * current_batch_size
+                loss = cross_entropy_loss(output, label)
+                if train_params.add_similarity_loss and cos_loss is not None:
+                    loss += cos_loss
+                current_batch_size = label.size(0)
+                total_samples += current_batch_size
+                if not torch.isnan(loss).any():
+                    test_loss += loss.item() * current_batch_size
             
-            # for I3DGCN stream, we add other ref_models to chase best performance
-            if ref_models is not None:
-                for model_ in ref_models:
-                    model_.eval()
-                    _, logits, _ = model_(kps, flow, rgb)
-                    output += logits
+                # for I3DGCN stream, we add other ref_models to chase best performance
+                if ref_models is not None:
+                    for model_ in ref_models:
+                        model_.eval()
+                        _, logits, _ = model_(kps, flow, rgb)
+                        output += logits
                 
             _, predict = torch.max(output.data, 1)
             test_correct += (predict == label).sum().item()

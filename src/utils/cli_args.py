@@ -9,7 +9,7 @@ from typing import Literal, List, Optional, Tuple
 import torch
 
 DEFAULT_ACTIONS_LIST = ["Running", "Walking", "Sniffing", "Standing(on all fours)", "Standing(bipedal)", "Sitting", "Lying", \
-           "Coughing", "Seizures", "Vomiting", "Abnormal Movement"]
+           "Coughing", "Seizures", "Vomiting", "Movement Disorder"]
 DEFAULT_SKELETON_LIST = [[0, 1], [0, 2], [1, 2], [2, 3], [3, 4], [3, 5], [5, 6], [6, 7], [3, 8], [8, 9], [9, 10], [4, 14], [14, 15], [15, 16], [4, 11], [11, 12], [12, 13]]
 # DILATIONS_LIST = [1] # [1, 2, 3]
 @dataclass
@@ -69,7 +69,7 @@ class DataArguments:
         metadata={"help":"Indicates whether the video stabilization step should be skipped."}
     )
     stabilized_crop_percentage: float = field(
-        default= 0.9,
+        default= 1,
         metadata={"help":"Defines the cropping ratio to remove black borders that may appear due to video stabilization."}
     )
     # --- for feature extraction ---
@@ -476,6 +476,10 @@ class TrainingArguments:
     for_test: float = field(
         default=False, 
         metadata={"help":"Whether this is for testing, not formal process of training"}
+    )
+    use_autocast: bool = field(
+        default=False,
+        metadata={"help":"Whether using autocast to train faster"}
     )
 
 @dataclass

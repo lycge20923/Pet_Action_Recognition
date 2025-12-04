@@ -51,7 +51,7 @@ def aggregate_video_level_labels(annotation_dir):
 
     return video_level
 
-def normalize_keypoints(keypoints, bboxes, num_nodes):
+def normalize_keypoints(keypoints, bboxes, num_nodes, flow_size):
     """
     Normalize each keypoint in a frame relative to its bounding box.
     If either keypoints or bboxes is empty, return a single [0,0,0].
@@ -63,11 +63,38 @@ def normalize_keypoints(keypoints, bboxes, num_nodes):
     height = y2 - y1
     if width <= 0 or height <= 0:
         return [[0.0, 0.0, 0.0] for _ in range(num_nodes)]
+    
+    W_flow, H_flow = flow_size
+    scale = min(W_flow / width, H_flow / height)
+    new_w = width * scale
+    new_h = height * scale
+    pad_w = W_flow - new_w
+    pad_h = H_flow - new_h
+    left = pad_w / 2.0
+    top  = pad_h / 2.0
+    
     normalized = []
     for x, y, c in keypoints:
-        nx = (x - x1) / width
-        ny = (y - y1) / height
-        normalized.append([nx, ny, c])
+        if x == 0.0 and y == 0.0 and c == 0.0:
+            normalized.append([0.0, 0.0, 0.0])
+            continue
+        x_rel = (x - x1) * scale
+        y_rel = (y - y1) * scale
+
+        # 2) 再加上 padding，得到在整張 flow 圖的 pixel 座標
+        x_flow = left + x_rel
+        y_flow = top  + y_rel
+
+        # 3) 保險起見，夾到合法範圍
+        x_flow = max(0.0, min(W_flow - 1.0, x_flow))
+        y_flow = max(0.0, min(H_flow - 1.0, y_flow))
+
+        # 4) 轉成 [0,1] normalized（對應 local_flow_stats 裡 x_pix = x_norm*(W-1)）
+        x_norm_flow = x_flow / (W_flow - 1.0)
+        y_norm_flow = y_flow / (H_flow - 1.0)
+
+        normalized.append([x_norm_flow, y_norm_flow, c])
+        
     return normalized
 
 
@@ -162,7 +189,7 @@ def process_single_video(input_path, id_, data_args, comparison_args, of_args,
     video_name = os.path.basename(input_path)
 
     # --- annotation 解析 ---
-    if comparison_args.for_comparison:
+    if comparison_args.for_comparison and comparison_args.dataset_name != "LoTE":
         result_annotation = find_video_info(video_df, video_name.split(".")[0])
         source_video_id, action_id = result_annotation["original_vido_id"], int(result_annotation["labels"])
         annotation = {
@@ -195,6 +222,9 @@ def process_single_video(input_path, id_, data_args, comparison_args, of_args,
     keypoints_all_frames, bboxes_all_frames = result_pe["keypoints"], result_pe["bboxes"]
     bbox_pe_annotation, bbox_annotation = [], []
     detect_status = set()
+    
+    vid_info = get_video_info(input_path)
+    frame_h, frame_w = vid_info["frame_height"], vid_info["frame_width"]
 
     for keypoints_, bboxes_ in zip(keypoints_all_frames, bboxes_all_frames):
         if isinstance(keypoints_, dict):
@@ -208,7 +238,7 @@ def process_single_video(input_path, id_, data_args, comparison_args, of_args,
         elif len(keypoints) > 1 and comparison_args.for_comparison:
             detect_status.add("multiple")
             vid_info = get_video_info(input_path)
-            h, w = vid_info["frame_height"], vid_info["frame_width"]
+            h, w = frame_h, frame_w
             cx, cy = w * 0.5, h * 0.5
 
             b = np.asarray(bboxes_, dtype=float)
@@ -238,9 +268,12 @@ def process_single_video(input_path, id_, data_args, comparison_args, of_args,
             detect_status.add("one")
             keypoints = [[float(ele[1]), float(ele[0]), float(ele[2])] for ele in keypoints[0][1]]
             bboxes = bboxes_.tolist()[0]
+        
+        if not data_args.do_crop:
+            bboxes = [0.0, 0.0, float(frame_w), float(frame_h)]
 
         bbox_annotation.append(bboxes)
-        normalized_keypoints = normalize_keypoints(keypoints, bboxes, num_nodes=data_args.num_nodes)
+        normalized_keypoints = normalize_keypoints(keypoints, bboxes, num_nodes=data_args.num_nodes, flow_size=of_args.input_model_size)
         bbox_pe_annotation.append(normalized_keypoints)
 
     # --- 裁切 + 光流 ---
@@ -345,10 +378,14 @@ def main():
     
     if comparison_args.for_comparison:
         video_path = os.path.join(data_args.data_dir, data_args.seg_dir_name)
-        annotation_dir = os.path.join(os.path.dirname(os.path.dirname(video_path)), "annotation")
-        video_df = aggregate_video_level_labels(annotation_dir)
+        if comparison_args.dataset_name != "LoTE":
+            annotation_dir = os.path.join(os.path.dirname(os.path.dirname(video_path)), "annotation")
+            video_df = aggregate_video_level_labels(annotation_dir)
+        else:
+            video_df = None
         
     for id_, input_path in enumerate(video_paths):
+        
         try:
             annotation, exec_fps_pe, det_rate, exec_fps_of = process_single_video(
                 input_path, id_, data_args, comparison_args, of_args,

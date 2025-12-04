@@ -92,7 +92,7 @@ def set_models(model_dirs:list):
 def set_dataloaders(joints, local_flow, diff, i3dgcn, I3D, fold_num, data_params, rgb):
     load_kps = joints or local_flow or diff or i3dgcn
     load_flows = local_flow or i3dgcn or (I3D and not rgb)
-    load_rgbs = (I3D and rgb)
+    load_rgbs = rgb if I3D is not None else rgb
     aug_params_eval = AugmentationArguments(augment=False)
     val_dataset = KpOfDataset(data_params, aug_params_eval, load_flows=load_flows, load_kps=load_kps, load_rgbs=load_rgbs, istrain=False, fold_num=fold_num)
     val_loader = DataLoader(
@@ -157,7 +157,13 @@ def main():
         if args.i3dgcn_stream:
             save_subdir.append("i3dgcn")
         if args.I3D_stream:
-            save_subdir.append(os.path.join("supplement", "I3D"))
+            if not args.rgb:
+                save_subdir.append(os.path.join("supplement", "I3D"))
+            else:
+                save_subdir.append(os.path.join("supplement", "I3D_RGB"))
+        if args.X3D_stream:
+            save_subdir.append(os.path.join("supplement", "X3D"))
+            
         
         all_models = []
         for fold_id in fold_ids:

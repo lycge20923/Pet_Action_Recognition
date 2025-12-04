@@ -182,3 +182,5 @@ wandb/*
 runs/*
 models/self_training/*
 models/comparison
+models/comparison_complete
+models/no_stab
