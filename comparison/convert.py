@@ -64,7 +64,7 @@ def build_x_y(samples, num_classes, target_joints, strict_shape=False):
     samples = sorted(samples, key=lambda s: s.get("sample_id", 0))
 
     for s in samples:
-        kp_path = os.path.join("/home/r12922166/Pet_Action_Recognition", s["kp_feature_file"])
+        kp_path = os.path.join("./", s["kp_feature_file"])
         if not os.path.isfile(kp_path):
             raise FileNotFoundError(f"kp_feature_file not found: {kp_path}")
 
@@ -403,15 +403,15 @@ def main():
         )
         logger.info(f"[convert] x_test shape:  {x_test.shape}, y_test shape:  {y_test.shape}")
         
-        # for tdgcn
-        y_test_idx = np.where(y_test > 0)[1]
-        val_sample_txt_path = os.path.join(output_dir, f"val_sample_fold_{fold_num}.txt")
-        with open(val_sample_txt_path, "w") as f:
-            for cls in y_test_idx:
-                # cls 是 0-based，所以要 +1，再補成 3 位數
-                f.write(f"{cls + 1:03d}\n")
+        # # for tdgcn
+        # y_test_idx = np.where(y_test > 0)[1]
+        # # val_sample_txt_path = os.path.join(output_dir, f"val_sample_fold_{fold_num}.txt")
+        # # with open(val_sample_txt_path, "w") as f:
+        # #     for cls in y_test_idx:
+        # #         # cls 是 0-based，所以要 +1，再補成 3 位數
+        # #         f.write(f"{cls + 1:03d}\n")
 
-        logger.info(f"[convert] Saving val_sample txt to: {val_sample_txt_path}")
+        # logger.info(f"[convert] Saving val_sample txt to: {val_sample_txt_path}")
 
         # Ensure output dir exists
         out_dir = os.path.dirname(output_dir)
