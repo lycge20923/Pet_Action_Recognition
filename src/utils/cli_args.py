@@ -488,6 +488,14 @@ class ComparisonArguments:
         default="comp_data", 
         metadata={"help":"The name of new data directory for comparison"}
     )
-    other_data_dir_name: str = field(
-        default="data/others/KABR",
+    dataset_name: Literal["KABR", "BaboonLand"] = field(
+        default="KABR",
+        metadata={"help": "The name for the comparison dataset"}
     )
+    fir_name_format: str = field(
+        default="data/others/{}",
+        metadata={"help":"The format of data dir."}
+    )
+    @property
+    def other_data_dir_name(self) -> Optional[str]:
+        return self.fir_name_format.format(self.dataset_name)

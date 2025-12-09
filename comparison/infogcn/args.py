@@ -21,7 +21,7 @@ def get_parser():
     parser.add_argument('--num_point', type=int, default=17, help='')
     parser.add_argument('--num_person', type=int, default=1, help='')
     parser.add_argument('--num_class', type=int, default=11, help='')
-    parser.add_argument('--dataset', default='PetAction', choices=["PetAction", "KABR"], help='data loader will be used')
+    parser.add_argument('--dataset', default='PetAction', choices=["PetAction", "KABR", "BaboonLand"], help='data loader will be used')
     # parser.add_argument('--datacase', default='CS', help='data loader will be used')
     parser.add_argument('--use_vel', type=str2bool, default=False, help='')
 

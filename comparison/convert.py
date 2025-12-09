@@ -335,28 +335,29 @@ def compute_velocity(arr: np.ndarray):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--KABR", action="store_true", help="Use KABR dataset")
-    temp_args = parser.parse_args()
+    parser.add_argument("--other_dataset_name", default=None)
+    args = parser.parse_args()
     
     logger = setup_logger(file_path=__file__, level=logging.INFO)
     
     comp_paras = ComparisonArguments()
+    comp_paras.dataset_name = args.other_dataset_name if args.other_dataset_name is not None else None
     data_params = DataArguments()
     target_joints = data_params.num_nodes
     
-    if not temp_args.KABR:
+    if not comp_paras.dataset_name:
         data_dir = os.path.join(data_params.data_dir, data_params.trainsplit_dir_name)
         annotation_path = os.path.join(data_dir, "annotation_windows_metadata.json")
         num_classes = data_params.num_classes
         num_folds = data_params.num_folds
         output_dir = os.path.join(data_params.data_dir, comp_paras.new_data_dir_name)
-        
     else:
         data_dir = comp_paras.other_data_dir_name
         annotation_path = os.path.join(data_dir, "train_split", "annotation_windows_metadata.json")
-        num_classes = 8
+        num_classes = 8 if comp_paras.dataset_name == "KABR" else 13
         num_folds = 1
         output_dir = os.path.join(data_dir, comp_paras.new_data_dir_name)
+    os.makedirs(output_dir, exist_ok=True)
     
     # load annotation
     with open(annotation_path, "r") as f:
@@ -366,7 +367,7 @@ def main():
     for fold_num in range(num_folds):
         logger.info(f"Start to run for fold num: {fold_num}")
         test_folds = set([fold_num])
-        if temp_args.KABR:
+        if comp_paras.dataset_name:
             train_folds = set([i for i in range(num_folds + 1) if i != fold_num])
         else:
             train_folds = set([i for i in range(num_folds) if i != fold_num])
@@ -403,13 +404,13 @@ def main():
         )
         logger.info(f"[convert] x_test shape:  {x_test.shape}, y_test shape:  {y_test.shape}")
         
-        # # for tdgcn
-        # y_test_idx = np.where(y_test > 0)[1]
-        # # val_sample_txt_path = os.path.join(output_dir, f"val_sample_fold_{fold_num}.txt")
-        # # with open(val_sample_txt_path, "w") as f:
-        # #     for cls in y_test_idx:
-        # #         # cls 是 0-based，所以要 +1，再補成 3 位數
-        # #         f.write(f"{cls + 1:03d}\n")
+        # for tdgcn
+        y_test_idx = np.where(y_test > 0)[1]
+        val_sample_txt_path = os.path.join(output_dir, f"val_sample_fold_{fold_num}.txt")
+        with open(val_sample_txt_path, "w") as f:
+            for cls in y_test_idx:
+                # cls 是 0-based，所以要 +1，再補成 3 位數
+                f.write(f"{cls + 1:03d}\n")
 
         # logger.info(f"[convert] Saving val_sample txt to: {val_sample_txt_path}")
 

@@ -3,33 +3,33 @@
 # feeder
 feeder: comparison.tdgcn.feeders.feeder_PetAction.Feeder
 train_feeder_args:
-  data_path: ./data/main/comp_data/data_joint_fold_1.npz # modify
+  data_path: ./data/others/BaboonLand/comp_data/data_joint_fold_0.npz # modify
   split: train
   debug: False
   random_choose: False
   random_shift: False
   random_move: False
-  window_size: 32
+  window_size: 16
   normalization: False
   random_rot: True
   p_interval: [0.5, 1]
-  bone: True # modify
+  bone: False # modify
   vel: False # modify
 
 test_feeder_args:
-  data_path: ./data/main/comp_data/data_joint_fold_1.npz # modify
+  data_path: ./data/others/BaboonLand/comp_data/data_joint_fold_0.npz # modify
   split: test
-  window_size: 32
+  window_size: 16
   p_interval: [0.95]
   debug: False
-  bone: True # modify
+  bone: False # modify
   vel: False # modify
   
 
 # model
 model: comparison.tdgcn.model.tdgcn.Model
 model_args:
-  num_class: 11
+  num_class: 13
   num_point: 17
   num_person: 1
   graph: comparison.tdgcn.graph.AP10K.Graph

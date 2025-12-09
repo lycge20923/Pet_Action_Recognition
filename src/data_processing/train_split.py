@@ -12,6 +12,23 @@ from ..utils.cli_args import DataArguments
 from ..utils.logging_utils import setup_logger
 from ..utils.common import set_comparison_config, set_comparison_config_args
 
+def load_video2fold_map(ref_meta_path, logger):
+    """
+    This is for the ablation study of preprocessing 
+    """
+    with open(ref_meta_path, "r") as f:
+        ref_meta = json.load(f)
+    video2fold = {}
+    missing_fold = 0
+    for item in ref_meta:
+        vname = item.get("video_name")
+        fold = item.get("fold")
+        if vname not in video2fold:
+            video2fold[vname] = int(fold)
+    
+    logger.info(f"[fold_ref] Loaded {len(video2fold)} video_name->fold mappings ")
+    return video2fold
+
 def build_source_action_vectors(all_samples):
     """
     sources:  sorted source list
@@ -207,9 +224,11 @@ def main():
         raw_anns = json.load(f)
     if not comparison_args.for_comparison:
         compute_basic_stats(raw_anns, logger)
-    raw_anns = [
-        a for a in raw_anns if a.get('keypoint_detection_rate', 0) >= data_args.min_kp_rate
-    ]
+        
+    if data_args.feature_extract_dir_name == "feature_extracted" and not comparison_args.for_comparison: # only for the complete experiment, not for ablation study
+        raw_anns = [
+            a for a in raw_anns if a.get('keypoint_detection_rate', 0) >= data_args.min_kp_rate
+        ]
     logger.info(f"After filter: {len(raw_anns)} clip videos remain")
 
     # 1) window generation + save .npz once
@@ -231,29 +250,69 @@ def main():
      
     logger.info(f"Saved {len(all_samples)} window samples (.npz)")
     if not comparison_args.for_comparison:
-        # 2) Group-aware multi-class stratification on sources -> fold map（修正版）
-        sources, actions, src2vec, total = build_source_action_vectors(all_samples)
-        source2fold = assign_sources_to_folds_balanced(
-            sources, src2vec, total, K=data_args.num_folds, seed=42, coverage_bonus=1.0
-        )
-        
         final_samples = []
-        for s in all_samples:
-            item = s.copy()
-            item['fold'] = source2fold[s['source_video_id']]
-            final_samples.append(item)
-    
-        # for logging
-        fold_srcs = defaultdict(list)
-        for src, f in source2fold.items():
-            fold_srcs[f].append(src)
+        # 2) Group-aware multi-class stratification on sources -> fold map
+        if data_args.feature_extract_dir_name != "feature_extracted": # for ablation study of stabilization & cropping 
+            ref_metadata_path = "data/main/train_split/annotation_windows_metadata.json"
+            if not os.path.exists(ref_metadata_path):
+                raise ValueError("For fair comparison, the dataset distribution of 5 folds should be the same among different experiments")
+            video2fold = load_video2fold_map(
+                ref_metadata_path,
+                logger
+            )
+            missing = 0
+            for s in all_samples:
+                vname = s["video_name"]
+                if vname not in video2fold:
+                    missing += 1
+                    logger.warning(
+                        f"[fold_ref] video_name '{vname}' not found in reference folds. "
+                        f"Sample_id={s['sample_id']} will be skipped."
+                    )
+                    continue
+
+                item = s.copy()
+                item["fold"] = video2fold[vname]
+                final_samples.append(item)
+
+            logger.info(
+                f"[fold_ref] Assigned folds from reference json for "
+                f"{len(final_samples)} samples, skipped {missing} samples without mapping."
+            )
+
+            # logging per-fold 統計
+            fold_srcs = defaultdict(set)
+            for it in final_samples:
+                fold_srcs[it["fold"]].add(it["source_video_id"])
+
+            for fold in range(data_args.num_folds):
+                cnt = Counter(s["action_id"] for s in final_samples if s["fold"] == fold)
+                sorted_cnt = {a: cnt.get(a, 0) for a in sorted({s["action_id"] for s in final_samples})}
+                n_src = len(fold_srcs.get(fold, []))
+                n_samp = sum(sorted_cnt.values())
+                logger.info(f"[Fold {fold}] #sources={n_src}, #samples={n_samp}, per-action={sorted_cnt}")
+        else:
+            sources, actions, src2vec, total = build_source_action_vectors(all_samples)
+            source2fold = assign_sources_to_folds_balanced(
+                sources, src2vec, total, K=data_args.num_folds, seed=42, coverage_bonus=1.0
+            )
+            
+            for s in all_samples:
+                item = s.copy()
+                item['fold'] = source2fold[s['source_video_id']]
+                final_samples.append(item)
         
-        for fold in range(data_args.num_folds):
-            cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
-            sorted_cnt = {a: cnt.get(a,0) for a in sorted({s['action_id'] for s in all_samples})}
-            n_src = len(fold_srcs.get(fold, []))
-            n_samp = sum(sorted_cnt.values())
-            logger.info(f"[Fold {fold}] #sources={n_src}, #samples={n_samp}, per-action={sorted_cnt}")
+            # for logging
+            fold_srcs = defaultdict(list)
+            for src, f in source2fold.items():
+                fold_srcs[f].append(src)
+            
+            for fold in range(data_args.num_folds):
+                cnt = Counter(s['action_id'] for s in final_samples if s['fold'] == fold)
+                sorted_cnt = {a: cnt.get(a,0) for a in sorted({s['action_id'] for s in all_samples})}
+                n_src = len(fold_srcs.get(fold, []))
+                n_samp = sum(sorted_cnt.values())
+                logger.info(f"[Fold {fold}] #sources={n_src}, #samples={n_samp}, per-action={sorted_cnt}")
     else:
         final_samples = all_samples
     # save final metadata

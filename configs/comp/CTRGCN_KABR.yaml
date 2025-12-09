@@ -1,0 +1,42 @@
+base_lr: 0.001
+batch_size: 32
+test_batch_size: 64
+num_epoch: 1000
+weights: null
+nesterov: True
+save_interval: 10
+save_epoch: 10
+eval_interval: 10
+seed: 42
+patient_epochs: 500
+step: []
+save_score: True
+
+# ===== Dataset ===== #
+feeder: comparison.CTRGCN.feeders.feeder_PetAction.Feeder
+train_feeder_args:
+  split: train
+  data_path: ./data/others/KABR/comp_data/data_joint_fold_0.npz # modify
+  window_size: 32
+  debug: False
+  p_interval: [0.5, 1]
+  bone: True # modify
+  vel: False # modify
+test_feeder_args:
+  data_path: ./data/others/KABR/comp_data/data_joint_fold_0.npz # modify
+  split: test
+  window_size: 32
+  p_interval: [0.95]
+  bone: True # modify
+  vel: False # modify
+
+# ===== Model ===== #
+model: comparison.CTRGCN.model.ctrgcn.Model
+model_args:
+  num_class: 8
+  num_point: 17
+  num_person: 1
+  graph: comparison.CTRGCN.graph.AP10K.Graph
+  graph_args:
+    labeling_mode: 'spatial'
+

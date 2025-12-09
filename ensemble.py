@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument('--i3dgcn_stream', action="store_true", help="Use I3D_GCN stream")
     parser.add_argument("--I3D_stream", action="store_true", help="Use I3D stream")
     parser.add_argument("--X3D_stream", action="store_true", help="Use X3D stream")
-    parser.add_argument("--joints_gcn_name", default="degcn", choices=["ctrgcn", "infogcn", "stgcn", "tdgcn", "degcn"], help="(ablation study) choose different gcn name if needed")
+    parser.add_argument("--joints_gcn_name", default="degcn", choices=["stgcn"], help="(ablation study) choose different gcn name if needed")
     parser.add_argument("--complete_blocks", action="store_true", help="Use complete blocks")
     parser.add_argument("--local_flow_block", default=5, type=int, help="For ablation study to test the local flow block")
     
@@ -133,19 +133,12 @@ def main():
                     save_subdir.append("joints")
                 else:
                     save_subdir.append(os.path.join("supplement", "joints_complete"))
-            else:
-                if not args.complete_blocks:
-                    save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}"))
-                else:
-                    save_subdir.append(os.path.join("supplement", f"joints_{args.joints_gcn_name}_complete"))
+            elif args.joints_gcn_name == "stgcn":
+                save_subdir.append(os.path.join("supplement", f"stgcn"))
+                
         if args.diff_stream:
-            if args.joints_gcn_name == "degcn":
-                save_subdir.append(os.path.join("supplement", "diff"))
-            else:
-                if not args.complete_blocks:
-                    save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}"))
-                else:
-                    save_subdir.append(os.path.join("supplement", f"diff_{args.joints_gcn_name}_complete"))
+            save_subdir.append(os.path.join("supplement", "diff"))
+            
         if args.local_flow_stream:
             if int(args.local_flow_block) == 5:
                 save_subdir.append("local_flow")

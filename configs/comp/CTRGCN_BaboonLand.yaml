@@ -16,24 +16,24 @@ save_score: True
 feeder: comparison.CTRGCN.feeders.feeder_PetAction.Feeder
 train_feeder_args:
   split: train
-  data_path: ./data/others/KABR/comp_data/data_joint_fold_0.npz # modify
-  window_size: 32
+  data_path: ./data/others/BaboonLand/comp_data/data_joint_fold_0.npz # modify
+  window_size: 16
   debug: False
   p_interval: [0.5, 1]
-  bone: False # modify
+  bone: True # modify
   vel: True # modify
 test_feeder_args:
-  data_path: ./data/others/KABR/comp_data/data_joint_fold_0.npz # modify
+  data_path: ./data/others/BaboonLand/comp_data/data_joint_fold_0.npz # modify
   split: test
-  window_size: 32
+  window_size: 16
   p_interval: [0.95]
-  bone: False # modify
+  bone: True # modify
   vel: True # modify
 
 # ===== Model ===== #
 model: comparison.CTRGCN.model.ctrgcn.Model
 model_args:
-  num_class: 8
+  num_class: 13
   num_point: 17
   num_person: 1
   graph: comparison.CTRGCN.graph.AP10K.Graph
