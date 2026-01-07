@@ -1,5 +1,58 @@
-# Pet_Action_Recognition
+# Pet Action Recognition
 
+This is the project for **A Multi-Stream Framework Integrating Joint and Optical-Flow Representations for Pet Action Recognition**
+
+## Preliminary Preparation
+
+### Set Up Environment
+
+* Create new virtual environment: ```conda create --name PAR python=3.10 -y```
+
+* Go to the environment: ```conda activate PAR```
+
+* Install related packages: 
+
+    ```
+    pip install -r requirements.txt
+    cd features/easy_ViTPose
+    pip install -e .
+    pip install -r requirements.txt
+    cd ../..
+    ```
+### Dataset Check List
+
+* Before running data preprocessing or training/testing, check the folders `data/main` (for **PetAction**) or `data/others/KABR` (for **KABR**) to determine what steps to run next.
+
+    <!-- | `raw` | `segmented` | `stabilized` | `feature_extracted` | `train_split` |   -->
+
+    <table>
+        <thead>
+            <tr>
+            <th>Dataset</th>
+            <th>Folder</th>
+            <th>Purpose</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+            <td rowspan="2"><b>PetAction</b></td>
+            <td><code>data/main</code></td>
+            <td>Main data root</td>
+            </tr>
+            <tr>
+            <td><code>data/main/...</code></td>
+            <td>Other PetAction assets</td>
+            </tr>
+
+            <tr>
+            <td><b>KABR</b></td>
+            <td><code>data/others/KABR</code></td>
+            <td>KABR data root</td>
+            </tr>
+        </tbody>
+    </table>
+
+<!-- 
 This project aims to recognize and classify various actions performed by pets (i.e., cats and dogs) from video footage using deep learning techniques. It is developed as part of a graduation thesis. The system can identify normal and abnormal actions, such as **Walking**, **Running**, **Seizures**, ... 
 <!-- TODO: Add the table to list the actions -->
 <!-- TODO: Push the paper finally -->
@@ -116,4 +169,4 @@ This project aims to recognize and classify various actions performed by pets (i
 
 * Important Notes
 
-    * When finishing the prediction, you could find the results in the ```output``` directory
+    * When finishing the prediction, you could find the results in the ```output``` directory -->

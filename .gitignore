@@ -174,7 +174,7 @@ cython_debug/
 .pypirc
 
 # some unecessary data
-data/*
+data/**
 models/pe/*
 output/*
 test/*
@@ -184,3 +184,7 @@ models/self_training/*
 models/comparison
 models/comparison_complete
 models/no_stab
+
+# keep
+!data/**/
+!data/main/metadata.csv
