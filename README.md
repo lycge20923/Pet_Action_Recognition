@@ -28,26 +28,31 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     <table>
         <thead>
             <tr>
-            <th>Dataset</th>
-            <th>Folder</th>
-            <th>Purpose</th>
+            <th rowspan="2">Dataset</th>
+            <th colspan="3">Folders</th>
+            </tr>
+            <tr>
+            <th>Root</th>
+            <th>Annotations</th>
+            <th>Splits</th>
             </tr>
         </thead>
         <tbody>
             <tr>
             <td><b>PetAction</b></td>
-            <td colspan="2">
-                <code>data/main</code> — Main data root (includes annotations, splits, etc.)
-            </td>
+            <td><code>data/main</code></td>
+            <td><code>data/main/annotations</code></td>
+            <td><code>data/main/splits</code></td>
             </tr>
             <tr>
             <td><b>KABR</b></td>
-            <td colspan="2">
-                <code>data/others/KABR</code> — KABR data root
-            </td>
+            <td><code>data/others/KABR</code></td>
+            <td><code>data/others/KABR/annotations</code></td>
+            <td><code>data/others/KABR/splits</code></td>
             </tr>
         </tbody>
     </table>
+
 
 <!-- 
 This project aims to recognize and classify various actions performed by pets (i.e., cats and dogs) from video footage using deep learning techniques. It is developed as part of a graduation thesis. The system can identify normal and abnormal actions, such as **Walking**, **Running**, **Seizures**, ... 
