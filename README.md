@@ -29,7 +29,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
         <thead>
             <tr>
                 <th colspan="5">Folders</th>
-                <th>Steps</th>
+                <th rowspan="2">Steps</th>
             </tr>
             <tr>
                 <th><code>raw</code></th>
@@ -37,6 +37,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <th><code>stabilized</code></th>
                 <th><code>feature_extracted</code></th>
                 <th><code>train_split</code></th>
+
             </tr>
         </thead>
         <tbody>
