@@ -38,7 +38,6 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <th><code>stabilized</code></th>
                 <th><code>feature_extracted</code></th>
                 <th><code>train_split</code></th>
-
                 <th>download</th>
                 <th>segmentation</th>
                 <th>stabilization</th>
@@ -53,22 +52,12 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <td>✅</td>
                 <td>✅</td>
                 <td>✅</td>
-                
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
                 <td>-</td>
-
                 <td>Nothing to do in this step, please skip `Dataset Preparation`</td>
-            </tr>
-            <tr>
-                <td>✅</td>
-                <td>✅</td>
-                <td>✅</td>
-                <td>✅</td>
-                <td>✅</td>
-                <td>You don't have to do anything</td>
             </tr>
         </tbody>
     </table>
