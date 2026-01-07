@@ -28,27 +28,25 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     <table>
         <thead>
             <tr>
-            <th rowspan="2">Dataset</th>
-            <th colspan="3">Folders</th>
+                <th colspan="5">Folders</th>
+                <th>Steps</th>
             </tr>
             <tr>
-            <th>Root</th>
-            <th>Annotations</th>
-            <th>Splits</th>
+                <th><code>raw</code></th>
+                <th><code>segmented</code></th>
+                <th><code>stabilized</code></th>
+                <th><code>feature_extracted</code></th>
+                <th><code>train_split</code></th>
             </tr>
         </thead>
         <tbody>
             <tr>
-            <td><b>PetAction</b></td>
-            <td><code>data/main</code></td>
-            <td><code>data/main/annotations</code></td>
-            <td><code>data/main/splits</code></td>
-            </tr>
-            <tr>
-            <td><b>KABR</b></td>
-            <td><code>data/others/KABR</code></td>
-            <td><code>data/others/KABR/annotations</code></td>
-            <td><code>data/others/KABR/splits</code></td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>You don't have to do anything</td>
             </tr>
         </tbody>
     </table>
