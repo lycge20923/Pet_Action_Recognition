@@ -16,4 +16,4 @@ parameters:
     values: [32]
   # other parameters...
   gcn_model_name:
-    values: ["stgcn", "tdgcn", "degcn", "infogcn", "ctrgcn"]
+    values: ["stgcn"]

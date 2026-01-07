@@ -13,7 +13,7 @@ train_feeder_args:
   normalization: False
   random_rot: True
   p_interval: [0.5, 1]
-  bone: True # modify
+  bone: False # modify
   vel: False # modify
 
 test_feeder_args:
@@ -22,7 +22,7 @@ test_feeder_args:
   window_size: 32
   p_interval: [0.95]
   debug: False
-  bone: True # modify
+  bone: False # modify
   vel: False # modify
   
 

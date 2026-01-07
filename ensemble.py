@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument('--i3dgcn_stream', action="store_true", help="Use I3D_GCN stream")
     parser.add_argument("--I3D_stream", action="store_true", help="Use I3D stream")
     parser.add_argument("--X3D_stream", action="store_true", help="Use X3D stream")
-    parser.add_argument("--joints_gcn_name", default="degcn", choices=["stgcn"], help="(ablation study) choose different gcn name if needed")
+    parser.add_argument("--joints_gcn_name", default="degcn", choices=["stgcn", "degcn"], help="(ablation study) choose different gcn name if needed")
     parser.add_argument("--complete_blocks", action="store_true", help="Use complete blocks")
     parser.add_argument("--local_flow_block", default=5, type=int, help="For ablation study to test the local flow block")
     
@@ -171,7 +171,7 @@ def main():
         
     else:
         # set models
-        model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir]
+        model_dirs = [args.joints_stream_checkpoint_dir, args.local_flow_stream_checkpoint_dir, args.diff_stream_checkpoint_dir, args.I3D_checkpoint_dir, args.i3dgcn_stream_checkpoint_dir, args.X3D_checkpoint_dir]
         models, fold_num, data_params = set_models(model_dirs)
         
         fold_ids = [fold_num]
@@ -198,8 +198,20 @@ def main():
     all_preds = []
     all_details = defaultdict(lambda: {"preds": [], "ground-trues": []})
     
+    # === added (minimal) for per-fold mean/std ===
+    fold_metrics = []
+    fold_cms = []
+    
     count_samples = 0
     for models, fold_id in zip(all_models, fold_ids):
+        
+        # === added (minimal) fold-local accumulators ===
+        fold_trues = []
+        fold_preds = []
+        fold_correct = 0
+        fold_total = 0
+        fold_class_correct = torch.zeros(num_classes).to(device)
+        fold_class_total = torch.zeros(num_classes).to(device)
         
         # load data loader
         if args.five_fold_val:
@@ -224,13 +236,20 @@ def main():
                     
                 current_batch_size = label.size(0)
                 total_samples += current_batch_size
+                fold_total += current_batch_size
+                
                 _, predict = torch.max(total_logits.data, 1)
                 
                 test_correct += (predict == label).sum().item()
+                fold_correct += (predict == label).sum().item()
                 
                 # add batch label & predict to list
                 all_trues.extend(label.cpu().numpy())
                 all_preds.extend(predict.cpu().numpy())
+                
+                # === added (minimal) fold-local trues/preds ===
+                fold_trues.extend(label.cpu().numpy())
+                fold_preds.extend(predict.cpu().numpy())
                 
                 # collect details
                 for i in range(current_batch_size):
@@ -245,20 +264,54 @@ def main():
                 for i in range(current_batch_size):
                     true_label = label[i].item()       
                     class_total[true_label] += 1       
+                    fold_class_total[true_label] += 1
                     if corrects[i]:                    
                         class_correct[true_label] += 1 
+                        fold_class_correct[true_label] += 1
         del val_loader
         
-    cm = confusion_matrix(all_trues, all_preds, labels=list(range(num_classes))) # confusion matrix
-    cm = cm.astype(np.float32) / cm.sum(axis=1, keepdims=True)
+        # === added (minimal) compute per-fold metrics + store ===
+        cm_fold = confusion_matrix(fold_trues, fold_preds, labels=list(range(num_classes)))
+        cm_fold = cm_fold.astype(np.float32)
+        cm_fold = cm_fold / (cm_fold.sum(axis=1, keepdims=True) + 1e-12)
+        fold_cms.append(cm_fold)
+        
+        fold_acc = fold_correct / max(fold_total, 1)
+        fold_per_class_acc = fold_class_correct / (fold_class_total + 1e-6)
+        fold_macro_acc = fold_per_class_acc[fold_class_total > 0].mean().item()
+        
+        _, _, _, _ = precision_recall_fscore_support(
+            fold_trues,
+            fold_preds,
+            labels=list(range(num_classes)),
+            zero_division=0
+        )
+        fold_prec, fold_rec, fold_f1, _ = precision_recall_fscore_support(
+            fold_trues,
+            fold_preds,
+            average='macro',
+            zero_division=0
+        )
+        
+        fold_metrics.append({
+            "fold": int(fold_id),
+            "acc": float(fold_acc),
+            "macro_acc": float(fold_macro_acc),
+            "prec": float(fold_prec),
+            "rec": float(fold_rec),
+            "f1": float(fold_f1)
+        })
+    
+    # === modified (minimal): confusion matrix now averaged over folds ===
+    cm = np.stack(fold_cms, axis=0).mean(axis=0)
     
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
 
     # draw cm
-    cbar = ax.figure.colorbar(im, ax=ax)
-    cbar.ax.set_ylabel('Average Value', rotation=-90, va="bottom")
-    ax.set_title('Average Confusion Matrix (5-fold)')
+    # cbar = ax.figure.colorbar(im, ax=ax)
+    # cbar.ax.set_ylabel('Average Value', rotation=-90, va="bottom")
+    # ax.set_title('Average Confusion Matrix (5-fold)')
     ax.set_xlabel('Predicted Label')
     ax.set_ylabel('True Label')
     tick_marks = np.arange(len(actions))
@@ -305,20 +358,50 @@ def main():
         log_dict[f"val_precision_class_{action_name}"] = float(per_class_prec[i])
         log_dict[f"val_recall_class_{action_name}"] = float(per_class_rec[i])
         log_dict[f"val_f1_class_{action_name}"] = float(per_class_f1[i])
-        
-    print(f"Overall Micro Acc: {epoch_acc:.4f}, "
+    
+    # === added (minimal): print per-fold + mean/std (5-fold style) ===
+    def _mean_std(x):
+        x = np.asarray(x, dtype=np.float32)
+        if x.size <= 1:
+            return float(x.mean()), float(x.std(ddof=0))
+        return float(x.mean()), float(x.std(ddof=1))
+    
+    fold_accs = [m["acc"] for m in fold_metrics]
+    fold_macro_accs = [m["macro_acc"] for m in fold_metrics]
+    fold_precs = [m["prec"] for m in fold_metrics]
+    fold_recs = [m["rec"] for m in fold_metrics]
+    fold_f1s = [m["f1"] for m in fold_metrics]
+    
+    acc_mean, acc_std = _mean_std(fold_accs)
+    macc_mean, macc_std = _mean_std(fold_macro_accs)
+    p_mean, p_std = _mean_std(fold_precs)
+    r_mean, r_std = _mean_std(fold_recs)
+    f1_mean, f1_std = _mean_std(fold_f1s)
+    
+    print("Per-fold (macro) metrics:")
+    for m in fold_metrics:
+        print(f"  Fold {m['fold']}: Acc {m['acc']:.4f}, MacroAcc {m['macro_acc']:.4f}, "
+              f"Prec {m['prec']:.4f}, Rec {m['rec']:.4f}, F1 {m['f1']:.4f}")
+    
+    print(f"\n5-fold mean ± std:")
+    print(f"  Acc      : {acc_mean:.4f} ± {acc_std:.4f}")
+    print(f"  Macro Acc : {macc_mean:.4f} ± {macc_std:.4f}")
+    print(f"  Prec     : {p_mean:.4f} ± {p_std:.4f}")
+    print(f"  Rec      : {r_mean:.4f} ± {r_std:.4f}")
+    print(f"  F1       : {f1_mean:.4f} ± {f1_std:.4f}")
+    
+    # === keep your original print (pooled) unchanged ===
+    print(f"\nOverall Micro Acc: {epoch_acc:.4f}, "
         f"Macro Acc: {macro_acc:.4f}, "
         f"Prec: {overall_prec:.4f}, Rec: {overall_rec:.4f}, F1: {overall_f1:.4f}")
     print("Per-class:")
     for i in range(num_classes):
         action_name = actions[i]
-        # acc_i = per_class_acc[i].item()
         prec_i = per_class_prec[i]
         rec_i = per_class_rec[i]
         f1_i = per_class_f1[i]
         cor_i = class_correct[i].item()
         tot_i = class_total[i].item()
-        # print(f"  Class {actions[i]}, Acc: {acc_i:.4f} ({cor_i}/{tot_i}), P {prec_i:.4f}, R {rec_i:.4f}, F1 {f1_i:.4f}")
         print(f"  Class {actions[i]}, P {prec_i:.4f}, R {rec_i:.4f}({cor_i}/{tot_i}), F1 {f1_i:.4f}")
     
     np.savetxt(os.path.join(output_dir, "confusion_matrix.csv"), cm, fmt="%.2f", delimiter=',')

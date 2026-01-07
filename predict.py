@@ -29,6 +29,70 @@ from src.models.model import ActionRecognitionModel
 from features.pose_estimation import PoseEstimationModel
 from features.optical_flow import OpticalFlowModel
 
+
+# -----------------------------
+# [ADD] Visualize: Optical Flow (HSV) + Keypoints overlay video
+# -----------------------------
+def flow_to_bgr(flow_2hw: np.ndarray, mag_max: float = None) -> np.ndarray:
+    """
+    flow_2hw: (2, H, W) float32, (u,v)
+    mag_max:  用來做一致的縮放（建議用全片 percentile），若 None 則用當前 frame 的 max
+    return: (H, W, 3) uint8 BGR
+    """
+    u = flow_2hw[0]
+    v = flow_2hw[1]
+    mag, ang = cv2.cartToPolar(u, v, angleInDegrees=False)
+
+    # Hue: direction
+    h = (ang * 180 / np.pi / 2)
+
+    # normalize magnitude (0~1)
+    if mag_max is None:
+        # per-frame scaling（簡單，但不同 frame 亮度可能略不一致）
+        m = mag.max()
+        mag_max_use = (m if m > 1e-6 else 1.0)
+    else:
+        mag_max_use = (mag_max if mag_max > 1e-6 else 1.0)
+
+    mag_norm = np.clip(mag / mag_max_use, 0.0, 1.0)
+
+    hsv = np.zeros((mag.shape[0], mag.shape[1], 3), dtype=np.uint8)
+    hsv[..., 0] = h.astype(np.uint8)
+    hsv[..., 1] = (mag_norm * 255).astype(np.uint8)  # Saturation = magnitude
+    hsv[..., 2] = 255                                # Value fixed -> brighter
+
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    return bgr
+
+
+def draw_skeleton_on_frame(frame_bgr: np.ndarray, kps_v3: np.ndarray, bones, W: int, H: int):
+    """
+    frame_bgr: (H,W,3) uint8
+    kps_v3: (V,3) with (x_norm, y_norm, conf)
+    """
+    pts = []
+    for x_norm, y_norm, conf in kps_v3:
+        if conf <= 0:
+            pts.append(None)
+            continue
+        x_int = int(round(float(x_norm) * W))
+        y_int = int(round(float(y_norm) * H))
+        x_int = max(0, min(W - 1, x_int))
+        y_int = max(0, min(H - 1, y_int))
+        pts.append((x_int, y_int))
+
+    # lines
+    for a, b in bones:
+        if a < len(pts) and b < len(pts):
+            pa, pb = pts[a], pts[b]
+            if pa is not None and pb is not None:
+                cv2.line(frame_bgr, pa, pb, (0, 255, 0), 2)
+
+    # joints
+    for p in pts:
+        if p is not None:
+            cv2.circle(frame_bgr, p, 2, (0, 0, 255), -1)
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Prediction for Action Recognition')
     parser.add_argument('--input_path', required=True, help="The video path")
@@ -153,10 +217,10 @@ def predict():
         normalized_keypoints = normalize_keypoints(keypoints, bboxes, num_nodes=data_params.num_nodes, flow_size=of_params.input_model_size)
         bbox_pe_annotation.append(normalized_keypoints)
     keypoints_arr = np.array(bbox_pe_annotation)
-    np.save(os.path.join(output_dir, f"{base}_keypoints.npy"), keypoints_arr)
+    # np.save(os.path.join(output_dir, f"{base}_keypoints.npy"), keypoints_arr)
     
     bboxes_arr = np.array(bbox_annotation, dtype=object)
-    np.save(os.path.join(output_dir, f"{base}_bboxes.npy"), bboxes_arr)
+    # np.save(os.path.join(output_dir, f"{base}_bboxes.npy"), bboxes_arr)
 
     bbox_vis_path = os.path.join(output_dir, f"{base}_bbox_detect.{extension}")
     cap = cv2.VideoCapture(input_path)
@@ -188,7 +252,7 @@ def predict():
     # extract optical flow
     optical_model = OpticalFlowModel(**asdict(of_params))
     output_crop_path = os.path.join(output_dir, f"{base}_crop.{extension}")
-    crop_and_save_video(
+    rgb_np = crop_and_save_video(
         input_path=input_path,
         bbox_annotation=bbox_annotation,
         output_path=output_crop_path,
@@ -254,7 +318,37 @@ def predict():
     optical_flow_all_frames = result_of["optical_flows"]
     flows = np.stack(optical_flow_all_frames, axis=0)
     flows_arr = flows.astype(np.float32)
-    np.save(os.path.join(output_dir, f"{base}_optical_flows.npy"), flows_arr)
+    # np.save(os.path.join(output_dir, f"{base}_optical_flows.npy"), flows_arr)
+    
+    # output flows+kps
+    flow_kp_overlay_path = os.path.join(output_dir, f"{base}_flow_kp_overlay.mp4")
+
+    # safety: infer flow tensor layout (expect T,1,2,H,W)
+    T_flow = flows_arr.shape[0]
+    T_kp = keypoints_arr.shape[0]
+    T = min(T_flow, T_kp)
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer_flow_kp = cv2.VideoWriter(flow_kp_overlay_path, fourcc, fps, (W, H))
+
+    for t in range(T):
+        # flow: (1,2,H,W) -> (2,H,W)
+        flow_2hw = flows_arr[t]
+        if flow_2hw.ndim == 4:
+            # (1,2,H,W)
+            flow_2hw = flow_2hw[0]
+        # now flow_2hw should be (2,H,W)
+        flow_vis = flow_to_bgr(flow_2hw)
+
+        # overlay skeleton
+        draw_skeleton_on_frame(flow_vis, keypoints_arr[t], bones, W, H)
+
+        writer_flow_kp.write(flow_vis)
+
+    writer_flow_kp.release()
+    logger.info(f"Saved optical-flow + keypoints overlay to {flow_kp_overlay_path}")
+
+
     
     # --- sampling --- 
     samples = []
@@ -268,8 +362,9 @@ def predict():
         sample_last_ids.append(idxs[-1])
         kp_s = keypoints_arr[idxs].astype(np.float32)
         of_s = flows_arr[idxs].astype(np.float32)
+        rgb_s = rgb_np[idxs].astype(np.float32)
         fn = os.path.join(sample_dir, f"{index:04d}.npz")
-        np.savez_compressed(fn, keypoints=kp_s, optical_flows=of_s)
+        np.savez_compressed(fn, keypoints=kp_s, optical_flows=of_s, rgb=rgb_s)
         samples.append(fn)
     
     # ---set main models---
@@ -281,15 +376,18 @@ def predict():
     all_probs = []
     actions = data_params.actions
     with torch.no_grad():
+        start_time= time.time()
         for fn in samples:
             data = np.load(fn)
             kps = torch.from_numpy(data["keypoints"]).permute(2,0,1).unsqueeze(0).to(device)  # (1,3,T,V)
             fl  = torch.from_numpy(data["optical_flows"]).squeeze(axis=1).permute(1, 0, 2, 3).unsqueeze(0).to(device)  # (1,2,T,H,W)
-            
+            rgb = torch.from_numpy(data["rgb"]).squeeze(axis=1).permute(1, 0, 2, 3).unsqueeze(0).to(device)  # (1,3,T,H,W)
             total_logits = 0
+
+            
             for model in models:
                 model.eval()
-                _, logits, _ = model(kps, fl, None)
+                _, logits, _ = model(kps, fl, rgb)
                 total_logits += logits
             
             prob = F.softmax(total_logits, dim=1)[0]
@@ -297,7 +395,7 @@ def predict():
             window_results.append(pred)
             all_probs.append(prob.detach().cpu().numpy())
             logger.info(f"{os.path.basename(fn)} → class {pred} (p={prob[pred]:.3f})")
-
+        logger.info(f"Time for prediction: {time.time() - start_time} seconds") 
     # visualize prediction
     predictions = [actions[i] for i in window_results]
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -396,7 +494,19 @@ def predict():
         gt_idx = actions.index(gt_label)
 
     win = data_params.window_size
-    xs_center = (np.arange(n) * win + win / 2.0) / fps
+    # xs_center = (np.arange(n) * win + win / 2.0) / fps
+    xs_center = np.arange(1, n + 1)
+    curve_data_path = os.path.join(output_dir, f"{base}_gt_confidence_data.npz")
+    np.savez_compressed(
+        curve_data_path,
+        probs=probs_arr,          # [n_windows, n_classes]
+        actions=np.array(actions),# class 名稱列表
+        gt_label='' if gt_label is None else gt_label,
+        clip_indices=xs_center,
+        window_size=win,
+        fps=fps
+    )
+    logger.info(f"Saved GT confidence raw data to {curve_data_path}")
 
     if gt_idx is not None:
         y = probs_arr[:, gt_idx]
@@ -407,9 +517,11 @@ def predict():
 
     fig, ax = plt.subplots(figsize=(10, 3.6))
     ax.set_ylim(0.0, 1.05)
-    ax.set_xlabel("Time (s)")
+    # ax.set_xlabel("Time (s)")
+    ax.set_xlabel("Clip index (window)")
     ax.set_ylabel(y_label)
-    ax.set_title(f"{base} - {y_label} over time")
+    # ax.set_title(f"{base} - {y_label} over time")
+    ax.set_title(f"{base} - {y_label} over clips")
 
     threshold = 0.5
     for i in range(n - 1):

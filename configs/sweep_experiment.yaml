@@ -4,15 +4,7 @@ metric:
   name: best_val_acc
   goal: maximize
 parameters:
-  # change parameter you want
-  exec_name: # change to easily identify
-    values: ["experiment:this is a test"]
   fold_num:
-    values: [0]
-  epochs:
-    values: [1000]
-  batch_size:
-    values: [32]
-  add_I3D_branch:
-    values: [False]
-  
+    values: [0, 1, 2, 3, 4]
+  exec_name: # change to easily identify
+    values: ["exp"]

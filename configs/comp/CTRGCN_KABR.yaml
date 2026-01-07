@@ -20,14 +20,14 @@ train_feeder_args:
   window_size: 32
   debug: False
   p_interval: [0.5, 1]
-  bone: True # modify
+  bone: False # modify
   vel: False # modify
 test_feeder_args:
   data_path: ./data/others/KABR/comp_data/data_joint_fold_0.npz # modify
   split: test
   window_size: 32
   p_interval: [0.95]
-  bone: True # modify
+  bone: False # modify
   vel: False # modify
 
 # ===== Model ===== #

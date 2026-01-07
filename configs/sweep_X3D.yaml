@@ -7,7 +7,11 @@ parameters:
   fold_num:
     values: [0, 1, 2, 3, 4]
   exec_name: # change to easily identify
-    values: ["formal: i3dgcn stream"]
-  is_i3dgcn_stream:
+    values: ["formal:X3D stream"]
+  is_X3D_stream:
     values: [True]
-  # other parameters...
+  epochs:
+    values: [500]
+  batch_size:
+    values: [8]
+  

@@ -63,6 +63,8 @@ class Processor():
 
     def __init__(self, arg):
         self.arg = arg
+        if self.arg.dataset == "KABR":
+            self.arg.num_class = 8
         self.save_arg()
         self.global_step = 0
         # pdb.set_trace()
@@ -168,7 +170,7 @@ class Processor():
         self.loss = LabelSmoothingCrossEntropy().cuda()
 
         if self.arg.weights:
-            self.global_step = int(self.arg.weights[:-3].split('-')[-1])
+            # self.global_step = int(self.arg.weights[:-3].split('-')[-1])
             self.print_log('Load weights from {}.'.format(self.arg.weights))
             if '.pkl' in self.arg.weights:
                 with open(self.arg.weights, 'r') as f:
@@ -329,7 +331,7 @@ class Processor():
 
         #     torch.save(weights, f'{self.arg.work_dir}/runs-{epoch+1}-{int(self.global_step)}.pt')
 
-    def eval(self, epoch, loader_name=['test'], save_z=False):
+    def eval(self, epoch, loader_name=['test'], save_z=False, save_score=True):
         self.model.eval()
         self.print_log('Eval epoch: {}'.format(epoch + 1))
         for ln in loader_name:
@@ -389,10 +391,9 @@ class Processor():
                 self.print_log('\tTop{}: {:.2f}%'.format(
                     k, 100 * self.data_loader[ln].dataset.top_k(score, k)))
 
-            # if save_score:
-            #     with open('{}/epoch{}_{}_score.pkl'.format(
-            #             self.arg.work_dir, epoch + 1, ln), 'wb') as f:
-            #         pickle.dump(score_dict, f)
+            if save_score:
+                with open('{}/best_{}_score.pkl'.format(self.arg.work_dir, ln), 'wb') as f:
+                        pickle.dump(score_dict, f)
 
             accuracy = self.data_loader[ln].dataset.top_k(score, 1)
             if accuracy > self.best_acc:
@@ -460,7 +461,7 @@ class Processor():
             if self.arg.weights is None:
                 raise ValueError('Please appoint --weights.')
             self.arg.print_log = False
-            self.print_log('Model:   {}.'.format(self.arg.model))
+            # self.print_log('Model:   {}.'.format(self.arg.model))
             self.print_log('Weights: {}.'.format(self.arg.weights))
             self.eval(epoch=0, loader_name=['test'], save_z=True)
             self.print_log('Done.\n')
