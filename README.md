@@ -26,29 +26,27 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     <!-- | `raw` | `segmented` | `stabilized` | `feature_extracted` | `train_split` |   -->
 
     <table>
-    <thead>
-        <tr>
-        <th>Dataset</th>
-        <th>Folder</th>
-        <th>Purpose</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-        <td rowspan="2"><b>PetAction</b></td>
-        <td><code>data/main</code></td>
-        <td>Main data root</td>
-        </tr>
-        <tr>
-        <td><code>data/main/...</code></td>
-        <td>Other PetAction assets</td>
-        </tr>
-        <tr>
-        <td><b>KABR</b></td>
-        <td><code>data/others/KABR</code></td>
-        <td>KABR data root</td>
-        </tr>
-    </tbody>
+        <thead>
+            <tr>
+            <th>Dataset</th>
+            <th>Folder</th>
+            <th>Purpose</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+            <td><b>PetAction</b></td>
+            <td colspan="2">
+                <code>data/main</code> — Main data root (includes annotations, splits, etc.)
+            </td>
+            </tr>
+            <tr>
+            <td><b>KABR</b></td>
+            <td colspan="2">
+                <code>data/others/KABR</code> — KABR data root
+            </td>
+            </tr>
+        </tbody>
     </table>
 
 <!-- 
