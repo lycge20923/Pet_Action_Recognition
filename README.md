@@ -37,10 +37,17 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <th><code>stabilized</code></th>
                 <th><code>feature_extracted</code></th>
                 <th><code>train_split</code></th>
-
             </tr>
         </thead>
         <tbody>
+            <tr>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>You don't have to do anything</td>
+            </tr>
             <tr>
                 <td>✅</td>
                 <td>✅</td>
