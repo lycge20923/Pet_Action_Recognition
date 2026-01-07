@@ -2,7 +2,7 @@
 
 This is the project for **A Multi-Stream Framework Integrating Joint and Optical-Flow Representations for Pet Action Recognition**
 
-## Preliminary Preparation
+## Dataset Preparation
 
 ### Set Up Environment
 
@@ -21,7 +21,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     ```
 ### Dataset Check List
 
-* Before running data preprocessing or training/testing, check the folders `data/main` (for **PetAction**) or `data/others/KABR` (for **KABR**) to determine what steps to run next.
+* Before running the step of data preprocessing, training/testing, or prediction, go check the folders in `data/main` (for **PetAction**) or `data/others/KABR` (for **KABR**) to determine what steps to run next.
 
     <!-- | `raw` | `segmented` | `stabilized` | `feature_extracted` | `train_split` |   -->
 
@@ -29,7 +29,8 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
         <thead>
             <tr>
                 <th colspan="5">Folders</th>
-                <th rowspan="2">Steps</th>
+                <th colspan="5">Necessary Step(s)</th>
+                <th colspan="2">Notes</th>
             </tr>
             <tr>
                 <th><code>raw</code></th>
@@ -37,6 +38,12 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <th><code>stabilized</code></th>
                 <th><code>feature_extracted</code></th>
                 <th><code>train_split</code></th>
+
+                <th>download</th>
+                <th>segmentation</th>
+                <th>stabilization</th>
+                <th>feature extraction</th>
+                <th>dataset splitting</th>
             </tr>
         </thead>
         <tbody>
@@ -46,7 +53,14 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <td>✅</td>
                 <td>✅</td>
                 <td>✅</td>
-                <td>You don't have to do anything</td>
+                
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+
+                <td>Nothing to do in this step, please skip `Dataset Preparation`</td>
             </tr>
             <tr>
                 <td>✅</td>
