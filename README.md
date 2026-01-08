@@ -4,6 +4,8 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
 ## Dataset Preparation
 
+### Notes: It is necessary to Monitor disk capacity in real time with `watch df -h`, not to let it exceed the limitation!!!
+
 ### Set Up Environment
 
 * Create new virtual environment: ```conda create --name PAR python=3.10 -y```
@@ -19,6 +21,9 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     pip install -r requirements.txt
     cd ../..
     ```
+
+* Troubleshooting: If facing `cannot import name 'Sentinel' from 'typing_extensions'`, run `pip install -U "typing-extensions>=4.14.0"`
+
 ### Dataset Check List
 
 * Before running the step of training/testing, or prediction, go check the folders in `data/main` (for **PetAction**) or `data/others/KABR` (for **KABR**) to determine what steps to run next.
@@ -249,6 +254,13 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     ```
 ### Dataset Splitting
 
+- After conducting the commands described in the following paragraph, if you want to conduct training/testing of **CTR-GCN**, **InfoGCN** or **TD-GCN**, you have to additionally conduct the following command:
+
+    ```bash
+    python -m comparison.convert # for PetAction
+    python -m comparison.convert --other_dataset_name KABR # for KABR
+    ```
+
 #### PetAction
 
 - Conduct:
@@ -267,13 +279,15 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
 ## Train
 
+### Notes: It is necessary to Monitor memory usage in real time with `htop`, not to let it exceed the limitation!!!
+
 ### Wandb & Config Introduction
 
 - Before training, you have to build a `wandb` account.
 
 - For `wandb` training, it must use yaml to declare training parameters.
 
-- The yaml could be adjusted for parameter changes, i.e. only want to train on `fold_num` == 1, then set/modify the following code on your config file:
+- The yaml could be adjusted for parameter changes, e.g. only want to train on `fold_num` == 1, then set/modify the following code on your config file:
     
     ```
     fold_num:
@@ -346,7 +360,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
 #### Others
 
-- This is for model **CTR-GCN**, **InfoGCN**, **TD-GCN** training. Since those are 4-streams(Joint, Joint Velocity, Bone, Bone Velocity), while training one model, you have to conduct four times command
+- This is for model **CTR-GCN**, **InfoGCN**, **TD-GCN** training. Since those are 4-streams(Joint, Joint Velocity, Bone, Bone Velocity), while training one model, you have to conduct four times command with different setting for each time 
 
     1. **CTR-GCN**, **TD-GCN**
 
@@ -371,124 +385,74 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
             3. Go back to **Step 1** until you have conduct the four streams training.
 
-            * For example, when you want to train **CTR_GCN** in **PetAction**, then you should first modify the boolean value of `bone` = False & `vel` = False in `configs/comp/CTRGCN_PetAction.yaml`, and then conduct `bash scripts/comparison/comp_CTRGCN.sh` for training **Joint Stream**. Afterwards, you could modify the boolean value of `bone` = False & `vel` = True, and then conduct `bash scripts/comparison/comp_CTRGCN.sh` for training **Joint Velocity Stream**, and so on.
+            * For example, when you want to train **CTR_GCN** in **PetAction** in one fold(not all five folds), then you should first modify the boolean value of `bone` = False & `vel` = False in `configs/comp/CTRGCN_PetAction.yaml`, and then conduct `bash scripts/comparison/comp_CTRGCN.sh` for training **Joint Stream**. Afterwards, you could modify the boolean value of `bone` = False & `vel` = True, and then conduct `bash scripts/comparison/comp_CTRGCN.sh` for training **Joint Velocity Stream**, and so on.
+        
+        - When successfully conducting training, the folder for training would be created under `runs` folder, and the naming of the folder would be `comp_<model name>_<fold num>_<is bone?>_<is velocity>_<time>`.For example, `comp_CTRGCN_4_True_True_20251115123334` means conduct training **Bone Veocity** Stream for **CTRGCN** on fold 4.(sorry but, we don't additionally add dataset in the folder name) 
 
+    2. **InfoGCN**
 
-<!-- 
-This project aims to recognize and classify various actions performed by pets (i.e., cats and dogs) from video footage using deep learning techniques. It is developed as part of a graduation thesis. The system can identify normal and abnormal actions, such as **Walking**, **Running**, **Seizures**, ... 
-<!-- TODO: Add the table to list the actions -->
-<!-- TODO: Push the paper finally -->
-<!-- TODO: add some visualized videos on it -->
+        - You should conduct 
 
-## Table of Contents (目錄 - 可選但推薦)
-* [Setup Environment](#set-up-environment)
-* [Training / Validation](#trainingvalidation)
-* [Prediction](#prediction)
+            ```bash
+            CUDA_VISIBLE_DEVICES=<GPU device ID> python comparison/infogcn/main.py --use_vel <True or False> --mode <joint or bone> --fold_num <fold_num> # PetAction
 
-## Set Up Environment
+            CUDA_VISIBLE_DEVICES=<GPU device ID> python comparison/infogcn/main.py --use_vel <True or False> --mode <joint or bone> --dataset KABR --num_class 8 # KABR
+            ```
+        
+        - Similar to **CTR-GCN** or **TD-GCN**, you should conduct four times while each time has a different setting. For example, if you want to train **InfoGCN** in **KABR**, you should conduct `python comparison/infogcn/main.py --use_vel False --mode joint --dataset KABR --num_class 8` & `python comparison/infogcn/main.py --use_vel True --mode joint --dataset KABR --num_class 8` and so on.
 
-* Create new virtual environment: ```conda create --name PAR python=3.10 -y```
+        - When successfully conducting training, the folder for training would be created under `runs` folder, and the naming of the folder would be `comp_infogcn_<fold num>_<mode>(_vel)_<time>`.For example, `comp_infogcn_0_bone_vel_20251116012407` means conduct training **Bone Veocity** Stream on fold 0, and `comp_infogcn_4_joint_20251116012617` means conduct training **Joint** Stream on fold 4.
 
-* Go to the environment: ```conda activate PAR```
+## Test/Ensemble
 
-* Install related packages: 
+- Since training is splitted to two types of training: Main & Others(for **CTR-GCN**, **InfoGCN**, **TD-GCN**), we would explain separately.
 
-    ```
-    pip install -r requirements.txt
-    cd features/easy_ViTPose
-    pip install -e .
-    pip install -r requirements.txt
-    cd ../..
-    ```
+#### Main
 
-## Training/Validation
+- The main file is `ensemble.py`. There are 
 
-### Download Dataset 
+- There are two ways to test the result: **individual-fold** or **five-fold** testing
 
-* To download the necessary dataset for this project, run the following command from the root directory of the project
+    1. **Individual-fold**: You could refer to `# for individual` part for deciding which streams you want to add. For example, if I want to check the results of **Joint** and **Local Flow** Strreams, then I could conduct 
 
-    ```
-    python -m src.data_processing.download
-    ```
+        ```bash
+        CUDA_VISIBLE_DEVICES=<GPU device ID> python ensemble.py --joints_stream_checkpoint_dir <training dir of joints stream> --local_flow_stream_checkpoint_dir <training dir of local flow stream> 
+        ```
 
-* Important Notes
-
-    * This download process can take several hours to complete. It is highly recommended to run this command within a persistent terminal session (e.g., using tmux or screen) to ensure it continues running even if your connection drops.
-
-    * During the process, the script might prompt you to enter a verification code or an API key. Please follow the on-screen instructions carefully.
- 
-### Segment Dataset
-
-* After downloading the full videos, this step extracts the specific annotated action segments, conduct:
-
-    ```
-    python -m src.data_processing.segment
-    ```
-
-* Important Notes:
+        * The `<training dir>` would be complete directory path, e.g.`"runs/exp: joints stream_20251130_015542"`
     
-    * Processing Time: Depending on the total duration of the videos and the number of segments to be extracted, this process might also take a significant amount of time.
+    2. **Five-fold**: You could refer to `# for 5-fold validation` part for deciding which streams you want to add. However, quite different to the **Individual-fold**, you have to follow the rules storing the directories. More specificity, the directories containing weights should be placed in `models/self_training`. For more details, you could trace the first time of `if args.five_fold_val:` appearing and read the below codes of it. For the best result of the paper, you could conduct:
 
-### Video Stabilization(Optional)
-
-* In this step, we would refer [vidgear](https://github.com/abhiTronix/vidgear) to conduct video stabilization:
-
-    ```
-    python -m src.data_processing.stabilization
-    ```
-
-* If you don't conduct video stabilization, make sure to set ```skip_stabilization = True``` in ```src/utils/cli_args.py```
-
-### Obtain Information/Feature(keypoints and optical flows)
-
-* In this step, we would refer the following two repositories to extract keypoints and optical flows of the segmented videos:
-
-    1. [easy_ViTPose](https://github.com/JunkyByte/easy_ViTPose): extract skeleton information. 
-
-    2. [SEA-RAFT](https://github.com/princeton-vl/SEA-RAFT): extract optical flow information.
-
-    ```
-    python -m src.data_processing.feature_extraction
-    ```
-
-### Train-Val Split
-
-* In this step, it reads annotations, performs a 5-fold split by source video, samples fixed-size frame windows, balances class samples, and outputs train/validation JSON files. Conduct:
-
-    ```
-    python -m src.data_processing.train_split
-    ```
-
-### Training
-* Finally, we could start to train. To utilize ```wandb``` to help us to find the best parameters, please follow the below steps: 
-
-    1. Go check ```src/utils/cli_args.py``` to see the default values. If you want to change the values, it is recommended not to directly modify the values in it. Instead, you should write a config file like any files in ```configs```, and specify which parameters you want to change. For example, to disable ```add_contrastive_loss```, you could write:
-
-        ```
-        ...
-        parameters:
-          add_contrastive_loss: # this is the parameters you want to change
-            values: [False] # or you could specifiy multiple values like [True, False]
+        ```bash 
+        python ensemble.py --five_fold_val --joints_stream --local_flow_stream --i3dgcn_stream
         ```
 
-    2. Conduct the following commands
+#### Others
 
+- Sorry! Since no additional code has been written to simplify the 5-fold split process, please run the evaluation for the five folds sequentially, and then take the average of the five accuracies obtained. 
+
+- This is for model **CTR-GCN**, **InfoGCN**, **TD-GCN** training. There are two ways to test/ensemble:
+
+    1. **CTR-GCN**, **TD-GCN**: Conduct the following command
+
+        ```bash
+        bash scripts/comparison/ensemble_<model name>.sh <GPU device ID> <Fold num> <weights dir of joint> <weights dir of joint vel> <weights dir of bone> <weights dir of bone vel>
         ```
-        wandb sweep configs/sweep_config.yaml # this would include data augmentation and no data augmentation
+
+        * For example, `bash scripts/comparison/ensemble_CTRGCN.sh 4 4 models/self_training/4/supplement/ctrgcn/joint models/self_training/4/supplement/ctrgcn/joint_vel models/self_training/4/supplement/ctrgcn/bone models/self_training/4/supplement/ctrgcn/bone_vel`
+    
+    2. **InfoGCN**: Conduct the following command
+
+        ```bash
+        CUDA_VISIBLE_DEVICES=<GPU device ID> python -m comparison.infogcn.ensemble --dataset PetAction --position_ckpts <pkls of joint and bone> --motion_ckpts <pkls of joint vel and bone vel> --fold_num <fold num> # for PetAction
+        
+        CUDA_VISIBLE_DEVICES=<GPU device ID> python -m comparison.infogcn.ensemble --dataset KABR --position_ckpts <pkls of joint and bone> --motion_ckpts <pkls of joint vel and bone vel> # for KABR
         ```
 
-    3. Then it would show a command like ```wandb agent <path>```, copy and run it 
-
-    4. After finishing training(or you terminated on the way), you could go to check ```run``` directory and find the info of arguments(```.json```, ```.yaml```) and checkpoint (```.pth```) in it 
-
+        * For example, `CUDA_VISIBLE_DEVICES=0 python -m comparison.infogcn.ensemble --dataset PetAction --position_ckpts models/self_training/4/supplement/infogcn/bone/best_score.pkl models/self_training/4/supplement/infogcn/joint/best_score.pkl --motion_ckpts models/self_training/4/supplement/infogcn/bone_vel/best_score.pkl models/self_training/4/supplement/infogcn/joint_vel/best_score.pkl --fold_num 4`
+    
 ## Prediction
 
-* You could use the following command to make predictions on a video, it would output the intermediate results(including optical flows and keypoints) and the final results:
 
-    ```
-    python predict.py --input_path <input video path> --checkpoint_dir <checkpoint dir>
-    ```
 
-* Important Notes
-
-    * When finishing the prediction, you could find the results in the ```output``` directory -->
+        
