@@ -26,177 +26,147 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     <!-- | `raw` | `segmented` | `stabilized` | `feature_extracted` | `train_split` |   -->
 
     <table>
-    <thead>
-        <tr>
-        <th rowspan="2">Step</th>
-        <th colspan="5">Folders</th>
-        <th colspan="5">Necessary Preprocessing(s)</th>
-        <th rowspan="2">Notes</th>
-        </tr>
-        <tr>
-        <th><code>raw</code></th>
-        <th><code>segmented</code></th>
-        <th><code>stabilized</code></th>
-        <th><code>feature_extracted</code></th>
-        <th><code>train_split</code></th>
-
-        <th>1. download</th>
-        <th>2. segmentation</th>
-        <th>3. stabilization</th>
-        <th>4. feature extraction</th>
-        <th>5. dataset splitting</th>
-        </tr>
-    </thead>
-
-    <tbody>
-        <!-- Train/Test (6 rows) -->
-        <tr>
-        <td rowspan="6"><b>Train/Test</b></td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-        <td>✅</td>
-
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-
-        <td>Nothing to do in this step, please skip <code>## Dataset Preparation</code></td>
-        </tr>
-
-        <tr>
-        <td>✅</td>
-        <td>✅</td>
-        <td>✅</td>
-        <td>✅</td>
-        <td>❌</td>
-
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>⭕</td>
-
-        <td></td>
-        </tr>
-
-        <tr>
-        <td>✅</td>
-        <td>✅</td>
-        <td>✅</td>
-        <td>❌</td>
-        <td>❌</td>
-
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>⭕</td>
-        <td>⭕</td>
-
-        <td></td>
-        </tr>
-
-        <tr>
-        <td>✅</td>
-        <td>✅</td>
-        <td>❌</td>
-        <td>❌</td>
-        <td>❌</td>
-
-        <td>-</td>
-        <td>-</td>
-        <td>△</td>
-        <td>⭕</td>
-        <td>⭕</td>
-
-        <td></td>
-        </tr>
-
-        <tr>
-        <td>✅</td>
-        <td>❌</td>
-        <td>❌</td>
-        <td>❌</td>
-        <td>❌</td>
-
-        <td>-</td>
-        <td>⭕</td>
-        <td>⭕</td>
-        <td>⭕</td>
-        <td>⭕</td>
-
-        <td>It could be skipped. More details see in <code>### Stabilization</code></td>
-        </tr>
-
-        <tr>
-        <td>❌</td>
-        <td>❌</td>
-        <td>❌</td>
-        <td>❌</td>
-        <td>❌</td>
-
-        <td>⭕</td>
-        <td>⭕</td>
-        <td>⭕</td>
-        <td>⭕</td>
-        <td>⭕</td>
-
-        <td></td>
-        </tr>
-
-        <!-- Prediction (3 rows) -->
-        <tr>
-        <td rowspan="3"><b>Prediction</b></td>
-        <td>✅/❌</td>
-        <td>✅</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-
-        <td>Nothing to do in this step, please skip <code>## Dataset Preparation</code></td>
-        </tr>
-
-        <tr>
-        <td>✅</td>
-        <td>❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-
-        <td>-</td>
-        <td>⭕</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-
-        <td></td>
-        </tr>
-
-        <tr>
-        <td>❌</td>
-        <td>❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-        <td>✅/❌</td>
-
-        <td>⭕</td>
-        <td>⭕</td>
-        <td>-</td>
-        <td>-</td>
-        <td>-</td>
-
-        <td></td>
-        </tr>
-    </tbody>
+        <thead>
+            <tr>
+                <th rowspan="2">Step</th>
+                <th colspan="5">Folders</th>
+                <th colspan="5">Necessary Preprocessing(s)</th>
+                <th rowspan="2">Notes</th>
+            </tr>
+            <tr>
+                <th><code>raw</code></th>
+                <th><code>segmented</code></th>
+                <th><code>stabilized</code></th>
+                <th><code>feature_extracted</code></th>
+                <th><code>train_split</code></th>
+                <th>1. download</th>
+                <th>2. segmentation</th>
+                <th>3. stabilization</th>
+                <th>4. feature extraction</th>
+                <th>5. dataset splitting</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td rowspan="6"><b>Train/Test</b></td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>✅</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>Nothing to do in this step, please skip <code>## Dataset Preparation</code></td>
+            </tr>
+            <tr>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>⭕</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>✅</td>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>✅</td>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>-</td>
+                <td>-</td>
+                <td>△</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>✅</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>-</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>It could be skipped. More details see in <code>### Stabilization</code></td>
+            </tr>
+            <tr>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>❌</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td rowspan="3"><b>Prediction</b></td>
+                <td>✅/❌</td>
+                <td>✅</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td>Nothing to do in this step, please skip <code>## Dataset Preparation</code></td>
+            </tr>
+            <tr>
+                <td>✅</td>
+                <td>❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>-</td>
+                <td>⭕</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td></td>
+            </tr>
+            <tr>
+                <td>❌</td>
+                <td>❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>✅/❌</td>
+                <td>⭕</td>
+                <td>⭕</td>
+                <td>-</td>
+                <td>-</td>
+                <td>-</td>
+                <td></td>
+            </tr>
+        </tbody>
     </table>
 
 
