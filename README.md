@@ -205,7 +205,173 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     python -m src.data_processing.segment
     ```
 
+#### KABR
 
+- (skipped)
+
+### Stabilization
+
+#### PetAction
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.stabilization
+    ```
+
+#### KABR
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.stabilization --for_comparison --dataset_name KABR
+    ```
+
+### Feature Extraction
+
+- You could add `CUDA_VISIBLE_DEVICES=<GPU device ID>` to specify the GPU device ID.
+
+- If you want to use the unstabilized video from `data/main/segmented` instead of `data/main/stabilized`, you could modify `skip_stabilization` parameter in `src/utils/cli_args.py` to choose `True`. 
+
+#### PetAction
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.feature_extraction
+    ```
+#### KABR
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.feature_extraction --for_comparison --dataset_name KABR
+    ```
+### Dataset Splitting
+
+#### PetAction
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.train_split
+    ```
+
+#### KABR
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.train_split --for_comparison --dataset_name KABR
+    ```
+
+## Train
+
+### Wandb & Config Introduction
+
+- Before training, you have to build a `wandb` account.
+
+- For `wandb` training, it must use yaml to declare training parameters.
+
+- The yaml could be adjusted for parameter changes, i.e. only want to train on `fold_num` == 1, then set/modify the following code on your config file:
+    
+    ```
+    fold_num:
+        values: [1]
+    ```
+
+- For more parameters to choose, you could refer `src/utils/cli_args.py`
+
+- There are some config files in the `configs`:
+
+    1. Main, for our proposed architecture:
+
+        * `configs/sweep_joints.yaml`: **Joints** Stream
+
+        * `configs/sweep_joints.yaml`: **Local Flow** Stream
+
+        * `configs/sweep_i3dgcn.yaml`: **I3DGCN** Stream
+
+    2. Other but share the same training architecture
+
+        * `configs/sweep_I3D.yaml`: **I3D** Stream, the `I3D_mode` could be adjusted to `rgb` to use rgb-based I3D
+
+        * `configs/sweep_X3D.yaml`: **X3D** Stream
+
+        * `configs/sweep_stgcn.yaml`: **ST-GCN** Stream
+    
+    3. KABR
+        
+        * `configs/sweep_KABR.yaml`: It could be used for training or reference for setting in KABR
+    
+    4. Experiment/Testing
+
+        * `configs/sweep_experiment.yaml`: Just for experiment
+
+        * `configs/sweep_test.yaml`: For simple and quick testing 
+    
+- You might see that also some configs in `configs/comp`, just skip those files in the folder, we would introduce in the next section
+
+### Start Training
+
+- Before training, make sure your configs are set right
+
+- Two types of training: Main & Others(for **CTR-GCN**, **InfoGCN**, **TD-GCN**)
+
+#### Main
+
+- Main training(except for model **CTR-GCN**, **InfoGCN**, **TD-GCN**): You could choose two scripts for training:
+
+    1. `scripts/train_with_wandb.sh`
+
+        ```bash
+        bash scripts/train_with_wandb.sh <GPU device ID> <Sweep File path>
+        ```
+
+        * e.g. `bash scripts/train_with_wandb.sh 2 configs/sweep_local_flow.yaml`
+
+    2. `scripts/onestep_experiment.sh`: This would directly use the config file `configs/sweep_experiment.yaml`
+
+        ```bash
+        bash scripts/onestep_experiment.sh <GPU device ID> 
+        ```
+
+        * e.g. `bash scripts/onestep_experiment.sh 2
+
+- When successfully conducting training, the folder for training would be created under `runs` folder, and the naming of the folder would be `<Name of exec_name in config>_<Time>`. For example, `formal:X3D stream(no-pretrained)_20251112_113230`, where `formal:X3D stream(no-pretrained)` is the `exec_name` in config file and `20251112_113230` would be near the time start training. In the folder, there would be several files:
+
+    1. `args_adjusted.yaml` & `args_complete.json`: Training parameters for specifically and total declaration, separately
+
+    2. `best.pth`, `confusion_matrix.csv`, `details.json`: Weights, confusion matrix, prediction details for the best accuracy during training
+
+#### Others
+
+- This is for model **CTR-GCN**, **InfoGCN**, **TD-GCN** training. Since those are 4-streams(Joint, Joint Velocity, Bone, Bone Velocity), while training one model, you have to conduct four times command
+
+    1. **CTR-GCN**, **TD-GCN**
+
+        - Those are corresponded to `CTRGCN_<dataset name>.yaml` or `tdgcn_<dataset name>.yaml` in `configs/comp`
+
+        - Training scripts are corresponded to `scripts/comparison/comp_CTRGCN.sh` and `scripts/comparison/comp_tdgcn.sh`. The steps are:
+
+            1. Change the boolean value of `bone` & `vel` in the yaml file. Those are label `# modify`. The stream are:
+
+                |`bone`|`vel`|Stream|
+                |------|-----|------|
+                | False|False|Joint|
+                | False| True| Joint Velocity|
+                | True |False| Bone|
+                | True | True| Bone Velocity|
+            
+            2. Conduct the bash scripts:
+
+                ```bash
+                bash scripts/comparison/comp_<Model Name>.sh <GPU device ID> 
+                ```
+
+            3. Go back to **Step 1** until you have conduct the four streams training.
+
+            * For example, when you want to train **CTR_GCN** in **PetAction**, then you should first modify the boolean value of `bone` = False & `vel` = False in `configs/comp/CTRGCN_PetAction.yaml`, and then conduct `bash scripts/comparison/comp_CTRGCN.sh` for training **Joint Stream**. Afterwards, you could modify the boolean value of `bone` = False & `vel` = True, and then conduct `bash scripts/comparison/comp_CTRGCN.sh` for training **Joint Velocity Stream**, and so on.
 
 
 <!-- 
