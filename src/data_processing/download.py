@@ -28,27 +28,37 @@ if __name__ =='__main__':
     logger = setup_logger(file_path=__file__)
     
     # read excel from drive
-    drive_df = pd.read_csv(args.drive_url)
-    num_old_rows, num_new_rows = 0, drive_df.shape[0]
-
-    # check and set operation 
     metadata_path = os.path.join(args.data_dir, args.metadata_name)
-    if args.operation == "extend":
-        
-        # read the local metadata file
-        if not os.path.exists(metadata_path):
-            logger.warning("```metadata.csv``` was not found in the destination directory. We would then use reload operation to re-download the dataset.")
-            num_old_rows = 0 
-        else:
-            local_df = pd.read_csv(metadata_path)
-            num_old_rows = local_df.shape[0]
-            if num_old_rows > num_new_rows:
-                logger.warning("Some videos are deleted, We would use reload operation to re-download the dataset.")
-                num_old_rows = 0
+    try:
+        drive_df = pd.read_csv(args.drive_url)
+        num_old_rows, num_new_rows = 0, drive_df.shape[0]
 
-    with open(metadata_path, 'w') as f:
-        drive_df.to_csv(f, index=False)
-        print(f"metadata.csv file is saved in {metadata_path}")
+        # check and set operation 
+        if args.operation == "extend":
+            
+            # read the local metadata file
+            if not os.path.exists(metadata_path):
+                logger.warning("```metadata.csv``` was not found in the destination directory. We would then use reload operation to re-download the dataset.")
+                num_old_rows = 0 
+            else:
+                local_df = pd.read_csv(metadata_path)
+                num_old_rows = local_df.shape[0]
+                if num_old_rows > num_new_rows:
+                    logger.warning("Some videos are deleted, We would use reload operation to re-download the dataset.")
+                    num_old_rows = 0
+
+        with open(metadata_path, 'w') as f:
+            drive_df.to_csv(f, index=False)
+            print(f"metadata.csv file is saved in {metadata_path}")
+    except:
+        if os.path.exists(metadata_path):
+            logger.info("Download video via local metadata. It would download complete videos whether there are some videos in it.")
+            drive_df = pd.read_csv(metadata_path)
+            num_old_rows, num_new_rows = 0, drive_df.shape[0]
+        else:
+            mes = "Dataset could not be download. Contact someone!"
+            logger.warning(mes)
+            raise ValueError(mes)
 
     for index, row in tqdm(drive_df.iloc[num_old_rows:num_new_rows].iterrows(),  total=num_new_rows - num_old_rows):
         

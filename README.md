@@ -169,6 +169,23 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
         </tbody>
     </table>
 
+### Dataset Download
+
+#### PetAction
+
+- First, check whether the required metadata file exists. There are two possible locations. If neither exists, contact someone:
+
+    1. Google Sheet: [link](https://docs.google.com/spreadsheets/d/10UWZqFRBe5JKn8gc0GOzNIlZilEwLHGP2AjiCc1Hj-I/edit?gid=0#gid=0)
+    
+    2. `data/main/metadata.csv`
+
+- Run the following command:
+
+    ```bash
+    python -m src.data_processing.download
+    ```
+    
+    * If file in Google Sheet exists and you just want to download the videos that have not been downloaded yet, you could modify `operation` parameter in `src/utils/cli_args.py` to choose `extend`. 
 
 
 <!-- 
