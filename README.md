@@ -107,11 +107,11 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <td>❌</td>
                 <td>❌</td>
                 <td>-</td>
+                <td>△</td>
                 <td>⭕</td>
                 <td>⭕</td>
                 <td>⭕</td>
-                <td>⭕</td>
-                <td></td>
+                <td>For PetAction: you need to conduct segmentation. For KABR, it is not necessary</td>
             </tr>
             <tr>
                 <td>❌</td>
@@ -120,7 +120,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <td>❌</td>
                 <td>❌</td>
                 <td>⭕</td>
-                <td>⭕</td>
+                <td>△</td>
                 <td>⭕</td>
                 <td>⭕</td>
                 <td>⭕</td>
@@ -186,6 +186,26 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     ```
     
     * If file in Google Sheet exists and you just want to download the videos that have not been downloaded yet, you could modify `operation` parameter in `src/utils/cli_args.py` to choose `extend`. 
+
+#### KABR
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.ref_download --dataset_name KABR
+    ```
+
+### Segmentation
+
+#### PetAction
+
+- Conduct:
+
+    ```bash
+    python -m src.data_processing.segment
+    ```
+
+
 
 
 <!-- 
