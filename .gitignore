@@ -172,3 +172,19 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# some unecessary data
+data/**
+models/pe/*
+output/*
+test/*
+wandb/*
+runs/*
+models/self_training/*
+models/comparison
+models/comparison_complete
+models/no_stab
+
+# keep
+!data/**/
+!data/main/metadata.csv

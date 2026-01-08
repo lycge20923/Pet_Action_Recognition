@@ -1,0 +1,13 @@
+torch
+torchvision
+torchaudio
+numpy
+matplotlib
+scipy
+opencv-python
+tensorboard
+h5py
+tqdm
+einops
+huggingface_hub
+safetensors
