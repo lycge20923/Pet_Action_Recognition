@@ -426,6 +426,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
         ```bash 
         python ensemble.py --five_fold_val --joints_stream --local_flow_stream --i3dgcn_stream
         ```
+- The resultant directory would be saved in `output`, it would be `ensemble_<time>_<fold_num>` for **individual-fold** and `ensemble_<time>_all` for **five-fold**. Files in it would be confusion matrix and prediction details
 
 #### Others
 
@@ -439,20 +440,98 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
         bash scripts/comparison/ensemble_<model name>.sh <GPU device ID> <Fold num> <weights dir of joint> <weights dir of joint vel> <weights dir of bone> <weights dir of bone vel>
         ```
 
-        * For example, `bash scripts/comparison/ensemble_CTRGCN.sh 4 4 models/self_training/4/supplement/ctrgcn/joint models/self_training/4/supplement/ctrgcn/joint_vel models/self_training/4/supplement/ctrgcn/bone models/self_training/4/supplement/ctrgcn/bone_vel`
+        * For example: 
+
+            ```bash
+            bash scripts/comparison/ensemble_CTRGCN.sh 4 4 \
+            models/self_training/4/supplement/ctrgcn/joint \
+            models/self_training/4/supplement/ctrgcn/joint_vel \
+            models/self_training/4/supplement/ctrgcn/bone \
+            models/self_training/4/supplement/ctrgcn/bone_vel
+            ```
     
     2. **InfoGCN**: Conduct the following command
 
         ```bash
-        CUDA_VISIBLE_DEVICES=<GPU device ID> python -m comparison.infogcn.ensemble --dataset PetAction --position_ckpts <pkls of joint and bone> --motion_ckpts <pkls of joint vel and bone vel> --fold_num <fold num> # for PetAction
+        CUDA_VISIBLE_DEVICES=<GPU device ID> python -m comparison.infogcn.ensemble \
+        --dataset PetAction \
+        --position_ckpts <pkls of joint and bone> \
+        --motion_ckpts <pkls of joint vel and bone vel> \
+        --fold_num <fold num> # for PetAction
         
-        CUDA_VISIBLE_DEVICES=<GPU device ID> python -m comparison.infogcn.ensemble --dataset KABR --position_ckpts <pkls of joint and bone> --motion_ckpts <pkls of joint vel and bone vel> # for KABR
+        CUDA_VISIBLE_DEVICES=<GPU device ID> python -m comparison.infogcn.ensemble \
+        --dataset KABR \
+        --position_ckpts <pkls of joint and bone> \
+        --motion_ckpts <pkls of joint vel and bone vel> # for KABR
         ```
 
-        * For example, `CUDA_VISIBLE_DEVICES=0 python -m comparison.infogcn.ensemble --dataset PetAction --position_ckpts models/self_training/4/supplement/infogcn/bone/best_score.pkl models/self_training/4/supplement/infogcn/joint/best_score.pkl --motion_ckpts models/self_training/4/supplement/infogcn/bone_vel/best_score.pkl models/self_training/4/supplement/infogcn/joint_vel/best_score.pkl --fold_num 4`
+        * For example: 
+        ```bash
+        CUDA_VISIBLE_DEVICES=0 python -m comparison.infogcn.ensemble --dataset PetAction \
+        --position_ckpts models/self_training/4/supplement/infogcn/bone/best_score.pkl models/self_training/4/supplement/infogcn/joint/best_score.pkl \
+        --motion_ckpts models/self_training/4/supplement/infogcn/bone_vel/best_score.pkl models/self_training/4/supplement/infogcn/joint_vel/best_score.pkl \
+        --fold_num 4
+        ```
     
 ## Prediction
 
+- Same, two types of method for prediction: Main & Others(for **CTR-GCN**, **InfoGCN**, **TD-GCN**)
 
+### Main
 
-        
+- The video sample could be found out in `data/main/segmented`
+
+- To have the fair result, you should first verify which fold your video sample belongs to, and then use the model trained with that fold as the test split. You could match with `data/main/train_split/annotation_windows_metadata.json` to check it out
+
+- You could refer to `# def parse_args()` part for checking how to input the video and deciding which streams you want to add. For example:
+
+    ```bash
+    CUDA_VISIBLE_DEVICES=2 python predict.py \
+    --input_path data/main/segmented/0011_Sitting_0.mp4 \
+    --joints_stream_checkpoint_dir models/self_training/2/joints \
+    --local_flow_stream_checkpoint_dir models/self_training/2/local_flow \
+    --i3dgcn_stream_checkpoint_dir models/self_training/2/i3dgcn
+    ```
+
+- The resultant directory would be saved in `output`, it would be `predict_<time>`. Files in it would contain files generated during the data processing and visualization of the prediction.
+
+### Others
+
+- Sorry, since the timeline was tight, I didn’t implement a per-video prediction script. As a result, predictions must be run on the entire test dataset and then inspected to find the corresponding results. Therefore, there are also no intermediate files generated during data preprocessing.
+
+- The steps are a little complicated. It would be:
+
+    1. (Optional)For **CTR-GCN**, **TD-GCN**, conduct
+
+            ```bash
+            bash scripts/comparison/test_CTRGCN.sh <GPU device ID> <WORK Dir>
+            ```
+
+        For **TD-GCN**, conduct
+
+            ```bash
+            bash scripts/comparison/test_infogcn.sh <GPU device ID> <WORK Dir> <joint or bone> <vel?True or False> <fold num>
+            ```
+    
+    2. Afterwards, you could conduct the following command:
+
+        ```bash
+        python comparison/pred_visualize.py \
+        --ann_json <annotation_windows_metadata.json in train_split dataset> \
+        --fold <fold num> \
+        --pkl_joint <best_test_score.pkl stored in joint dir> \
+        --pkl_joint_vel <best_test_score.pkl stored in joint vel dir> \
+        --pkl_bone <best_test_score.pkl stored in bone dir> \
+        --pkl_bone_vel <best_test_score.pkl stored in bone vel>
+        ```
+        e.g.
+        ```bash 
+        python comparison/pred_visualize.py \
+        --ann_json data/main/train_split/annotation_windows_metadata.json \
+        --fold 0 \
+        --pkl_joint runs/comp_CTRGCN_0_False_False_20251217181049/best_test_score.pkl \
+        --pkl_joint_vel runs/comp_CTRGCN_0_False_True_20251217181158/best_test_score.pkl \
+        --pkl_bone runs/comp_CTRGCN_0_True_False_20251217181232/best_test_score.pkl \
+        --pkl_bone_vel runs/comp_CTRGCN_0_True_True_20251217181301/best_test_score.pkl
+        ```
+- The resultant json file would be stored in `output` directory.

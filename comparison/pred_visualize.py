@@ -41,9 +41,9 @@ def infer_split_from_keys(keys):
 
 def build_ann_index(ann_list, fold: int, split: str):
     if split == "test":
-        lst = [a for a in ann_list if int(a.get("fold", -999)) == fold]
+        lst = [a for a in ann_list if int(a.get("fold", -999)) == int(fold)]
     elif split == "train":
-        lst = [a for a in ann_list if int(a.get("fold", -999)) != fold]
+        lst = [a for a in ann_list if int(a.get("fold", -999)) != int(fold)]
     else:
         raise ValueError("split must be 'test' or 'train'")
     # IMPORTANT: match your data-building order (sorted by sample_id)
