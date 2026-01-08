@@ -516,7 +516,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     2. Afterwards, you could conduct the following command:
 
         ```bash
-        python comparison/pred_visualize.py \
+        python comparison/pred_result.py \
         --ann_json <annotation_windows_metadata.json in train_split dataset> \
         --fold <fold num> \
         --pkl_joint <best_test_score.pkl stored in joint dir> \
@@ -526,7 +526,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
         ```
         e.g.
         ```bash 
-        python comparison/pred_visualize.py \
+        python comparison/pred_result.py \
         --ann_json data/main/train_split/annotation_windows_metadata.json \
         --fold 0 \
         --pkl_joint runs/comp_CTRGCN_0_False_False_20251217181049/best_test_score.pkl \
