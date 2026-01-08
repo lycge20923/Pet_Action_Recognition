@@ -503,15 +503,15 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
     1. (Optional)For **CTR-GCN**, **TD-GCN**, conduct
 
-            ```bash
-            bash scripts/comparison/test_CTRGCN.sh <GPU device ID> <WORK Dir>
-            ```
+        ```bash
+        bash scripts/comparison/test_CTRGCN.sh <GPU device ID> <WORK Dir>
+        ```
 
         For **TD-GCN**, conduct
 
-            ```bash
-            bash scripts/comparison/test_infogcn.sh <GPU device ID> <WORK Dir> <joint or bone> <vel?True or False> <fold num>
-            ```
+        ```bash
+        bash scripts/comparison/test_infogcn.sh <GPU device ID> <WORK Dir> <joint or bone> <vel?True or False> <fold num>
+        ```
     
     2. Afterwards, you could conduct the following command:
 
