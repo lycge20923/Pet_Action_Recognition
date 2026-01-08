@@ -85,7 +85,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <td>-</td>
                 <td>⭕</td>
                 <td>⭕</td>
-                <td>It could be skipped. More details see in <code>### Stabilization</code></td>
+                <td></td>
             </tr>
             <tr>
                 <td>✅</td>
@@ -98,7 +98,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
                 <td>△</td>
                 <td>⭕</td>
                 <td>⭕</td>
-                <td></td>
+                <td>It could be skipped. More details see in <code>### Stabilization</code></td>
             </tr>
             <tr>
                 <td>✅</td>
