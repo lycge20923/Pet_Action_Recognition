@@ -2,6 +2,8 @@
 
 This is the project for **A Multi-Stream Framework Integrating Joint and Optical-Flow Representations for Pet Action Recognition**
 
+- Youtube video for introduction: https://youtu.be/HLxQxLGYrPw 
+
 ## Architecture
 
 ![Main Architecture](images/Architecture.png)
