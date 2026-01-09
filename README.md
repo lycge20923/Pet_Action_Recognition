@@ -10,7 +10,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
 ## Where to find this code & dataset
 
-* All code and data are stored in `/data_19T/r12922166/Pet_Action_Recognition`
+* All code and data are stored in `Peko(@140.112.29.93)` `/data_19T/r12922166/Pet_Action_Recognition`
 
 ## Set Up Environment
 
