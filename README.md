@@ -8,6 +8,10 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
 ![I3DGCN](images/SubArchitecture.png)
 
+## Where to find this code & dataset
+
+* All code and data are stored in `/data_19T/r12922166/Pet_Action_Recognition`
+
 ## Dataset Preparation
 
 ### Notes: It is necessary to Monitor disk capacity in real time with `watch df -h`, not to let it exceed the limitation!!!
