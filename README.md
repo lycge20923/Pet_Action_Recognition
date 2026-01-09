@@ -12,11 +12,7 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
 
 * All code and data are stored in `/data_19T/r12922166/Pet_Action_Recognition`
 
-## Dataset Preparation
-
-### Notes: It is necessary to Monitor disk capacity in real time with `watch df -h`, not to let it exceed the limitation!!!
-
-### Set Up Environment
+## Set Up Environment
 
 * Create new virtual environment: ```conda create --name PAR python=3.10 -y```
 
@@ -33,6 +29,10 @@ This is the project for **A Multi-Stream Framework Integrating Joint and Optical
     ```
 
 * Troubleshooting: If facing `cannot import name 'Sentinel' from 'typing_extensions'`, run `pip install -U "typing-extensions>=4.14.0"`
+
+## Dataset Preparation
+
+### Notes: It is necessary to Monitor disk capacity in real time with `watch df -h`, not to let it exceed the limitation!!!
 
 ### Dataset Check List
 
