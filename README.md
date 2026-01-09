@@ -2,6 +2,12 @@
 
 This is the project for **A Multi-Stream Framework Integrating Joint and Optical-Flow Representations for Pet Action Recognition**
 
+## Architecture
+
+![Main Architecture](images/Architecture.png)
+
+![I3DGCN](images/SubArchitecture.png)
+
 ## Dataset Preparation
 
 ### Notes: It is necessary to Monitor disk capacity in real time with `watch df -h`, not to let it exceed the limitation!!!
