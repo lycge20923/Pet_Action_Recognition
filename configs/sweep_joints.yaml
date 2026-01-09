@@ -15,3 +15,5 @@ parameters:
   batch_size:
     values: [32]
   # other parameters...
+  seed:
+    values: [52]
